@@ -19,6 +19,15 @@
   - Bandpass-filtered, acoustic micro-interactions (soft haptic clicks, damped cavity resonance, warm low-frequency motor hum).
   - Zero harsh raw synthesizer beeps.
 
+- **3 Mode Pembersihan (RoboDust Paradigm)**:
+  - **Tidy Up**: Otomatis mengelompokkan file desktop yang berserakan ke subfolder kategori (`Documents`, `Media`, `Code & Scripts`, `Archives & Installers`, `Folders`, `Miscellaneous`) di dalam folder `Tidy_YYYY-MM-DD` di Desktop.
+  - **Clean (Default)**: Memindahkan file ke Windows Recycle Bin secara aman dengan flag `FOF_ALLOWUNDO` (dapat di-undo kapan saja via `Ctrl + Z` di Windows Explorer).
+  - **Delete**: Menghapus file permanen langsung dari storage dengan dialog konfirmasi keamanan ganda.
+
+- **DPI-Aware Coordinate Precision**:
+  - Konversi otomatis dari koordinat pixel fisik Windows Explorer (`SysListView32`) ke logical viewport Qt berdasarkan Device Pixel Ratio (`dpr = 1.0`, `1.25`, `1.5`, `2.0`).
+  - Menghindari bug icon hilang di sisi kanan monitor dan pergerakan vacuum keluar bezel layar.
+
 - **Non-Destructive File Operations**:
   - Simulation preserves real desktop files untouched until user confirms.
   - Review screen with direct selection.

@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import QFileIconProvider
 from PyQt6.QtCore import QFileInfo
 from PyQt6.QtGui import QPixmap, QIcon
 
-from win32_helper import get_desktop_icons_info
+from win32_helper import get_desktop_icons_info, get_file_category
 
 SYSTEM_ITEM_NAMES = {
     'recycle bin', 'this pc', 'control panel', 'network',
@@ -19,14 +19,17 @@ class DesktopItem:
     name: str
     display_name: str
     path: Optional[str]
-    x: int
-    y: int
+    x: float
+    y: float
+    physical_x: int
+    physical_y: int
     size_bytes: int
     is_dir: bool
     is_system: bool
     is_git: bool
     is_recent: bool
     is_shortcut: bool
+    category: str = "Miscellaneous"
     is_eligible: bool = True
     pixmap: Optional[QPixmap] = None
 
@@ -57,12 +60,13 @@ class DesktopScanner:
 
     def scan(
         self,
+        dpr: float = 1.0,
         protect_recent_minutes: int = 15,
         include_shortcuts: bool = True,
         ignore_git: bool = True
     ) -> list[DesktopItem]:
         """
-        Scan desktop icons with screen coordinates and safety guardrails.
+        Scan desktop icons with logical screen coordinates (scaled by DPR) and safety guardrails.
         """
         lv_icons = get_desktop_icons_info()
         now = time.time()
@@ -85,7 +89,7 @@ class DesktopScanner:
 
         items: list[DesktopItem] = []
 
-        # If lv_icons is empty (e.g. desktop listview wasn't queried), fallback to grid layout
+        # If lv_icons is empty (fallback), layout in grid
         if not lv_icons:
             grid_x = 40
             grid_y = 40
@@ -116,10 +120,12 @@ class DesktopScanner:
             is_git = False
             is_recent = False
             is_shortcut = False
+            category = "Miscellaneous"
 
             if matched_path and os.path.exists(matched_path):
                 is_dir = os.path.isdir(matched_path)
                 is_shortcut = matched_path.lower().endswith('.lnk')
+                category = get_file_category(matched_path)
 
                 # Check git repo
                 if is_dir and os.path.exists(os.path.join(matched_path, '.git')):
@@ -136,7 +142,6 @@ class DesktopScanner:
                 # Calculate size
                 try:
                     if is_dir:
-                        # Folder size (rough estimate first level)
                         size_bytes = sum(
                             os.path.getsize(os.path.join(matched_path, f))
                             for f in os.listdir(matched_path)
@@ -147,12 +152,14 @@ class DesktopScanner:
                 except Exception:
                     size_bytes = 0
             elif not is_system:
-                # Could be system icon not in dictionary
                 is_system = True
 
             # Determine eligibility for cleaning
             is_eligible = True
             if is_system:
+                is_eligible = False
+            elif 'kumacleaner' in name_lower:
+                # Do not delete or vacuum the app's own shortcut/files!
                 is_eligible = False
             elif is_git and ignore_git:
                 is_eligible = False
@@ -171,18 +178,26 @@ class DesktopScanner:
                 except Exception:
                     pass
 
+            # Coordinate scaling: Convert physical pixels to Qt logical pixels!
+            effective_dpr = max(1.0, float(dpr))
+            logical_x = float(lv['x']) / effective_dpr
+            logical_y = float(lv['y']) / effective_dpr
+
             item = DesktopItem(
                 name=clean_name,
                 display_name=os.path.basename(matched_path) if matched_path else clean_name,
                 path=matched_path,
-                x=lv['x'],
-                y=lv['y'],
+                x=logical_x,
+                y=logical_y,
+                physical_x=lv['x'],
+                physical_y=lv['y'],
                 size_bytes=size_bytes,
                 is_dir=is_dir,
                 is_system=is_system,
                 is_git=is_git,
                 is_recent=is_recent,
                 is_shortcut=is_shortcut,
+                category=category,
                 is_eligible=is_eligible,
                 pixmap=pixmap
             )

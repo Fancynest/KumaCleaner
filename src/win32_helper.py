@@ -205,20 +205,63 @@ def safe_recycle_files(paths: list[str]) -> bool:
     return ret == 0
 
 
-def organize_files_to_folder(paths: list[str], target_folder: str) -> list[str]:
-    """Move list of files to a organized target folder on Desktop."""
-    os.makedirs(target_folder, exist_ok=True)
+FILE_CATEGORIES = {
+    'Documents': {'.pdf', '.docx', '.doc', '.txt', '.xlsx', '.xls', '.pptx', '.ppt', '.csv', '.md', '.rtf', '.odt'},
+    'Media': {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.mp4', '.mkv', '.mov', '.avi', '.mp3', '.flac', '.wav', '.m4a'},
+    'Code & Scripts': {'.py', '.js', '.ts', '.html', '.css', '.json', '.kt', '.java', '.cpp', '.c', '.h', '.bat', '.cmd', '.ps1', '.sh', '.sql', '.php'},
+    'Archives & Installers': {'.zip', '.rar', '.7z', '.tar', '.gz', '.iso', '.exe', '.msi'},
+}
+
+
+def get_file_category(path: str) -> str:
+    if os.path.isdir(path):
+        return 'Folders'
+    ext = os.path.splitext(path)[1].lower()
+    for cat_name, extensions in FILE_CATEGORIES.items():
+        if ext in extensions:
+            return cat_name
+    return 'Miscellaneous'
+
+
+def tidy_up_files_categorized(paths: list[str], root_target_folder: str) -> list[str]:
+    """
+    Tidy up desktop clutter by organizing files into categorized subfolders
+    (Documents, Media, Code & Scripts, Archives, Folders, Miscellaneous).
+    """
+    os.makedirs(root_target_folder, exist_ok=True)
     moved = []
     for p in paths:
         if os.path.exists(p):
+            category = get_file_category(p)
+            dest_dir = os.path.join(root_target_folder, category)
+            os.makedirs(dest_dir, exist_ok=True)
+
             base_name = os.path.basename(p)
-            dest = os.path.join(target_folder, base_name)
-            # Avoid overwrite if file already exists in dest
+            dest = os.path.join(dest_dir, base_name)
             counter = 1
             name, ext = os.path.splitext(base_name)
             while os.path.exists(dest):
-                dest = os.path.join(target_folder, f"{name}_{counter}{ext}")
+                dest = os.path.join(dest_dir, f"{name}_{counter}{ext}")
                 counter += 1
             shutil.move(p, dest)
             moved.append(dest)
     return moved
+
+
+def permanent_delete_files(paths: list[str]) -> bool:
+    """Permanently delete files from disk."""
+    success = True
+    for p in paths:
+        try:
+            if os.path.isdir(p):
+                shutil.rmtree(p)
+            elif os.path.exists(p):
+                os.remove(p)
+        except Exception:
+            success = False
+    return success
+
+
+def organize_files_to_folder(paths: list[str], target_folder: str) -> list[str]:
+    """Move list of files to an organized target folder on Desktop."""
+    return tidy_up_files_categorized(paths, target_folder)
