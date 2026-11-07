@@ -1,31 +1,46 @@
-# 🤖 KumaCleaner LDS Pro (Windows Edition)
+# KumaCleaner LDS (Windows Edition)
 
-> **Versi Windows dari [muhraufan/robodust](https://github.com/muhraufan/robodust)**.  
-> Robot vacuum virtual realistis (gaya flagship modern seperti Roborock / Roomba) yang membersihkan desktop Windows Anda dengan animasi LiDAR sweep, side-brush berputar, laser obstacle avoidance, dan eksekusi file yang aman!
+> Native desktop workspace & clutter organizer for Windows with precision LDS navigation, differential kinematics, and non-destructive file operations.
 
 ---
 
-## ✨ Tampilan & Fitur Realistis Baru
+## Architecture & Design Principles
 
-- 🛸 **Model Robot Vacuum Realistis**:
-  - Tampilan *top-down* premium dengan bodi matte obsidian black, gunmetal titanium rim, dan seam lid dustbin.
-  - **LDS LiDAR Turret**: Kubah sensor laser berputar dengan pantulan optik dan diode ruby/cyan dinamis.
-  - **Spinning Side-Brush**: Sikat 3-lengan yang berputar aktif di sudut depan untuk menyapu debu ke corong hisap.
-  - **3D Structured Light Cross-Laser**: Memproyeksikan garis laser pemindai rintangan di lantai desktop di depan bumper.
-  - **Roda Suspensi Interaktif**: Saat Anda mengangkat robot dengan mouse, roda karetnya akan turun menjulur dengan per suspensi dan berputar di udara disertai peringatan sensor jatuh (*drop sensor*).
-  - **Realistic Ambient Ground Shadow**: Bayangan kontak multi-layer directional membuat robot terasa benar-benar mengambang di atas wallpaper desktop Anda.
+- **Precision Vector Hardware Rendering**:
+  - Pure subpixel vector rendering (anti-aliased `QPainter`) matching contemporary industrial design.
+  - Directional 45° key lighting, micro-beveled PBT composite chassis, recessed mechanical bumper seams, and dark acrylic optical windows.
+  - Raised LDS LiDAR turret with rotating ruby optical diode and satin aluminum chamfer collar.
+  - Active 3-arm industrial side-brush and differential suspension drive wheels with physical ground drop shadows.
 
-- 🏠 **Auto-Empty Charging Dock Station**:
-  - Stasiun dok pengisian daya realistis dengan ramp pendaratan, pin kontak emas, dan lampu indikator status bernapas.
-  - Robot keluar dari dok saat mulai dan mundur parkir secara presisi saat selesai.
+- **Auto-Empty Charging Base**:
+  - Geometric docking station with ramp taper, wheel guide grooves, satin brass charging contacts, and ambient status pinhole LED.
 
-- 🛡️ **100% Aman & Bergaransi Anti Hilang**:
-  - Selama robot bekerja, file fisik asli **TIDAK disentuh**.
-  - Di akhir pembersihan, muncul dialog konfirmasi:
-    1. **🗑️ Buang ke Recycle Bin** (Resmi Windows, bisa di-*restore* via `Ctrl + Z` di Desktop!).
-    2. **📁 Rapikan ke Folder** (Memindahkan file ke `Desktop/Kuma_Cleaned_YYYY-MM-DD`).
-    3. **↩️ Batal / Kembalikan** (Icon kembali seperti sedia kala).
-  - Dilengkapi proteksi otomatis: mengabaikan file yang baru diedit (< 15 menit), repository `.git`, dan icon sistem seperti *Recycle Bin* / *This PC*.
+- **Acoustic Sound Design**:
+  - Bandpass-filtered, acoustic micro-interactions (soft haptic clicks, damped cavity resonance, warm low-frequency motor hum).
+  - Zero harsh raw synthesizer beeps.
+
+- **Non-Destructive File Operations**:
+  - Simulation preserves real desktop files untouched until user confirms.
+  - Review screen with direct selection.
+  - Safe recycling via Windows `SHFileOperationW` (`FOF_ALLOWUNDO`) allowing standard `Ctrl + Z` undo in Windows Explorer.
+  - Global fail-safe hooks (`atexit` & `sys.excepthook`) guarantee desktop icon visibility is restored under all exit conditions.
+
+---
+
+## Quick Start
+
+### Start Menu / Desktop Shortcut
+Run `create_shortcut.py` or search for **KumaCleaner** in the Windows Start Menu.
+
+### Terminal
+```bash
+python main.py
+```
+
+### Controls
+- **Spacebar**: Launch cleaning sequence from dock.
+- **Escape**: Immediately abort cleaning and restore all desktop icons.
+- **Left Click + Drag**: Lift and inspect robot vacuum kinematics.
 
 ---
 

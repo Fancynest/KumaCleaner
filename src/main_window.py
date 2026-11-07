@@ -3,7 +3,7 @@ import sys
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QCheckBox, QSlider, QFrame, QMessageBox,
-    QProgressBar, QGroupBox
+    QGroupBox
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QIcon, QColor, QPixmap
@@ -24,111 +24,114 @@ class MainWindow(QMainWindow):
         self.refresh_stats()
 
     def init_ui(self):
-        self.setWindowTitle("🐻 KumaCleaner - Desktop Robot Vacuum for Windows")
-        self.setFixedSize(540, 620)
+        self.setWindowTitle("KumaCleaner LDS - Workspace Organizer")
+        self.setFixedSize(500, 560)
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #1e1e2e;
-                color: #cdd6f4;
-                font-family: 'Segoe UI', sans-serif;
+                background-color: #0F1013;
+                color: #E2E8F0;
+                font-family: 'Segoe UI', -apple-system, sans-serif;
             }
             QLabel {
-                color: #cdd6f4;
+                color: #E2E8F0;
+            }
+            QFrame#cardStats {
+                background-color: #16181D;
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                border-radius: 8px;
+                padding: 14px;
             }
             QGroupBox {
-                border: 1px solid #313244;
-                border-radius: 10px;
-                margin-top: 14px;
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                border-radius: 8px;
+                margin-top: 18px;
                 padding-top: 14px;
-                font-weight: bold;
-                color: #f9e2af;
+                font-weight: 600;
+                font-size: 11px;
+                color: #94A3B8;
+                letter-spacing: 0.5px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 14px;
-                padding: 0 5px;
+                left: 12px;
+                padding: 0 4px;
             }
             QCheckBox {
-                color: #cdd6f4;
+                color: #CBD5E1;
                 font-size: 13px;
                 spacing: 8px;
             }
             QCheckBox::indicator {
-                width: 18px;
-                height: 18px;
-                border-radius: 4px;
-                border: 1px solid #45475a;
-                background-color: #181825;
+                width: 16px;
+                height: 16px;
+                border-radius: 3px;
+                border: 1px solid #334155;
+                background-color: #0F1013;
             }
             QCheckBox::indicator:checked {
-                background-color: #89b4fa;
-                border: 1px solid #89b4fa;
+                background-color: #38BDF8;
+                border: 1px solid #38BDF8;
             }
             QSlider::groove:horizontal {
-                height: 6px;
-                background: #313244;
-                border-radius: 3px;
+                height: 4px;
+                background: #1E293B;
+                border-radius: 2px;
             }
             QSlider::sub-page:horizontal {
-                background: #89b4fa;
-                border-radius: 3px;
+                background: #38BDF8;
+                border-radius: 2px;
             }
             QSlider::handle:horizontal {
-                background: #cdd6f4;
-                width: 16px;
+                background: #F8FAFC;
+                width: 14px;
                 margin-top: -5px;
                 margin-bottom: -5px;
-                border-radius: 8px;
+                border-radius: 7px;
             }
             QPushButton#btnStart {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #89b4fa, stop:1 #a6e3a1);
-                color: #11111b;
+                background-color: #F8FAFC;
+                color: #0F172A;
                 border: none;
-                border-radius: 10px;
-                padding: 14px;
-                font-size: 15px;
-                font-weight: bold;
+                border-radius: 6px;
+                padding: 12px;
+                font-size: 14px;
+                font-weight: 600;
+                letter-spacing: 0.2px;
             }
             QPushButton#btnStart:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #b4befe, stop:1 #94e2d5);
+                background-color: #E2E8F0;
+            }
+            QPushButton#btnStart:pressed {
+                background-color: #CBD5E1;
             }
             QPushButton#btnEmergency {
                 background-color: transparent;
-                border: 1px solid #f38ba8;
-                color: #f38ba8;
-                border-radius: 6px;
-                padding: 6px 12px;
+                border: 1px solid #334155;
+                color: #94A3B8;
+                border-radius: 4px;
+                padding: 5px 10px;
                 font-size: 11px;
             }
             QPushButton#btnEmergency:hover {
-                background-color: rgba(243, 139, 168, 0.15);
+                border-color: #64748B;
+                color: #F1F5F9;
             }
         """)
 
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(24, 24, 24, 24)
-        main_layout.setSpacing(16)
+        main_layout.setContentsMargins(22, 22, 22, 22)
+        main_layout.setSpacing(14)
 
-        # Header with Logo & Mascot
+        # Header Title
         header_layout = QHBoxLayout()
-        mascot_lbl = QLabel()
-        assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
-        robot_preview = QPixmap(os.path.join(assets_dir, "robot_vacuum.png"))
-        if not robot_preview.isNull():
-            mascot_lbl.setPixmap(robot_preview.scaled(56, 56, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        else:
-            mascot_lbl.setText("🤖")
-            mascot_lbl.setFont(QFont("Segoe UI Emoji", 32))
-        header_layout.addWidget(mascot_lbl)
-
         title_layout = QVBoxLayout()
         title = QLabel("KumaCleaner LDS")
-        title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
-        title.setStyleSheet("color: #f9e2af;")
-        subtitle = QLabel("Realistic Desktop Robot Vacuum & Auto-Empty Dock")
-        subtitle.setStyleSheet("color: #a6adc8; font-size: 12px;")
+        title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        title.setStyleSheet("color: #F8FAFC;")
+        subtitle = QLabel("Desktop workspace organizer with LDS navigation")
+        subtitle.setStyleSheet("color: #64748B; font-size: 12px;")
         title_layout.addWidget(title)
         title_layout.addWidget(subtitle)
         header_layout.addLayout(title_layout)
@@ -136,58 +139,52 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(header_layout)
 
-        # Status Card (Desktop Mess Radar)
+        # Status Card (Desktop Scan Details)
         self.card = QFrame()
-        self.card.setStyleSheet("""
-            QFrame {
-                background-color: #181825;
-                border: 1px solid #313244;
-                border-radius: 10px;
-                padding: 12px;
-            }
-        """)
+        self.card.setObjectName("cardStats")
         card_layout = QVBoxLayout(self.card)
+        card_layout.setSpacing(6)
 
-        card_title = QLabel("📊 Status Desktop Saat Ini")
-        card_title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-        card_title.setStyleSheet("color: #89b4fa;")
+        card_title = QLabel("DESKTOP STATUS")
+        card_title.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        card_title.setStyleSheet("color: #64748B; letter-spacing: 0.8px;")
         card_layout.addWidget(card_title)
 
-        self.lbl_stats = QLabel("Memindai desktop...")
-        self.lbl_stats.setStyleSheet("font-size: 13px; line-height: 1.5;")
+        self.lbl_stats = QLabel("Scanning desktop items...")
+        self.lbl_stats.setStyleSheet("font-size: 13px; line-height: 1.5; color: #CBD5E1;")
         card_layout.addWidget(self.lbl_stats)
 
         main_layout.addWidget(self.card)
 
-        # Settings Group
-        settings_group = QGroupBox("⚙️ Pengaturan & Keamanan")
+        # Configuration Group
+        settings_group = QGroupBox("CONFIGURATION & SAFETY")
         settings_layout = QVBoxLayout(settings_group)
-        settings_layout.setSpacing(12)
+        settings_layout.setSpacing(10)
 
-        self.chk_protect_recent = QCheckBox("🛡️ Lindungi file yang baru diedit (< 15 menit)")
+        self.chk_protect_recent = QCheckBox("Protect recently modified files (< 15 minutes)")
         self.chk_protect_recent.setChecked(True)
         self.chk_protect_recent.stateChanged.connect(self.refresh_stats)
         settings_layout.addWidget(self.chk_protect_recent)
 
-        self.chk_include_shortcuts = QCheckBox("🔗 Sertakan file shortcut (.lnk)")
+        self.chk_include_shortcuts = QCheckBox("Include application shortcuts (.lnk)")
         self.chk_include_shortcuts.setChecked(True)
         self.chk_include_shortcuts.stateChanged.connect(self.refresh_stats)
         settings_layout.addWidget(self.chk_include_shortcuts)
 
-        self.chk_sound = QCheckBox("🔊 Aktifkan efek suara lucu (ping, sedot, komplain)")
+        self.chk_sound = QCheckBox("Enable acoustic audio cues")
         self.chk_sound.setChecked(True)
         self.chk_sound.stateChanged.connect(lambda s: sound_fx.set_enabled(s == 2))
         settings_layout.addWidget(self.chk_sound)
 
         # Speed slider
         speed_box = QHBoxLayout()
-        speed_lbl = QLabel("⚡ Kecepatan Kuma:")
-        speed_lbl.setStyleSheet("color: #a6adc8; font-size: 12px;")
+        speed_lbl = QLabel("Navigation speed:")
+        speed_lbl.setStyleSheet("color: #94A3B8; font-size: 12px;")
         self.speed_slider = QSlider(Qt.Orientation.Horizontal)
         self.speed_slider.setRange(1, 3)
         self.speed_slider.setValue(1)
-        self.speed_val_lbl = QLabel("1.0x (Santai)")
-        self.speed_val_lbl.setStyleSheet("color: #89b4fa; font-weight: bold; font-size: 12px; min-width: 80px;")
+        self.speed_val_lbl = QLabel("Standard (1.0x)")
+        self.speed_val_lbl.setStyleSheet("color: #38BDF8; font-size: 12px; min-width: 100px;")
         self.speed_slider.valueChanged.connect(self._on_speed_changed)
 
         speed_box.addWidget(speed_lbl)
@@ -199,31 +196,31 @@ class MainWindow(QMainWindow):
 
         main_layout.addStretch()
 
-        # Big Action Button
-        self.btn_start = QPushButton("🚀 Jalankan KumaCleaner!")
+        # Primary Action Button
+        self.btn_start = QPushButton("Start KumaCleaner")
         self.btn_start.setObjectName("btnStart")
         self.btn_start.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_start.clicked.connect(self.start_cleaning)
         main_layout.addWidget(self.btn_start)
 
-        # Footer with Emergency Restore button
+        # Footer
         footer_layout = QHBoxLayout()
-        hint = QLabel("Tekan ESC kapan saja saat membersihkan untuk batal")
-        hint.setStyleSheet("color: #6c7086; font-size: 11px;")
+        hint = QLabel("Press Esc during cleaning to immediately cancel and restore icons.")
+        hint.setStyleSheet("color: #64748B; font-size: 11px;")
         footer_layout.addWidget(hint)
         footer_layout.addStretch()
 
-        btn_emergency = QPushButton("🚨 Pulihkan Icon")
+        btn_emergency = QPushButton("Restore Icons")
         btn_emergency.setObjectName("btnEmergency")
-        btn_emergency.setToolTip("Paksa Windows menampilkan kembali seluruh icon desktop")
+        btn_emergency.setToolTip("Force Windows Explorer to refresh and show all desktop icons")
         btn_emergency.clicked.connect(self.emergency_restore)
         footer_layout.addWidget(btn_emergency)
 
         main_layout.addLayout(footer_layout)
 
     def _on_speed_changed(self, val: int):
-        speeds = {1: "1.0x (Santai)", 2: "1.7x (Normal)", 3: "2.8x (Turbo)"}
-        self.speed_val_lbl.setText(speeds.get(val, "1.0x"))
+        speeds = {1: "Standard (1.0x)", 2: "Accelerated (1.7x)", 3: "Fast (2.8x)"}
+        self.speed_val_lbl.setText(speeds.get(val, "Standard (1.0x)"))
 
     def get_speed_multiplier(self) -> float:
         val = self.speed_slider.value()
@@ -248,9 +245,9 @@ class MainWindow(QMainWindow):
             size_str = f"{total_bytes / (1024 * 1024):.1f} MB"
 
         self.lbl_stats.setText(
-            f"• Ditemukan <b>{len(items)} item</b> di desktop.<br>"
-            f"• <b>{len(eligible)} item siap disedot</b> (Total: {size_str})<br>"
-            f"• <span style='color: #a6e3a1;'>{len(protected)} item dilindungi</span> (Sistem / Baru diedit / Git)"
+            f"<b>{len(items)} items</b> detected on desktop.<br>"
+            f"<b>{len(eligible)} items</b> ready for cleaning ({size_str})<br>"
+            f"<span style='color: #64748B;'>{len(protected)} items protected (System, recent, or Git)</span>"
         )
         self.scanned_items = items
 
@@ -260,8 +257,8 @@ class MainWindow(QMainWindow):
         if not eligible:
             QMessageBox.information(
                 self,
-                "Desktop Sudah Bersih!",
-                "Tidak ada file yang memenuhi syarat untuk disedot saat ini."
+                "Desktop Clean",
+                "No eligible items found for cleaning."
             )
             return
 
@@ -276,7 +273,6 @@ class MainWindow(QMainWindow):
             self.overlay.close()
             self.overlay = None
 
-        # Always ensure desktop icons are restored
         win32_helper.set_desktop_icons_visible(True)
 
         if not sucked_items:
@@ -284,7 +280,6 @@ class MainWindow(QMainWindow):
             self.refresh_stats()
             return
 
-        # Show review dialog
         dialog = ReviewDialog(sucked_items, parent=self)
         dialog.exec()
 
@@ -295,8 +290,8 @@ class MainWindow(QMainWindow):
         win32_helper.set_desktop_icons_visible(True)
         QMessageBox.information(
             self,
-            "Icon Dipulihkan",
-            "Icon desktop Windows telah dipulihkan secara normal."
+            "Icons Restored",
+            "Windows desktop icons have been restored."
         )
 
     def closeEvent(self, event):

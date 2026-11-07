@@ -12,9 +12,21 @@ import win32_helper
 # Critical: bind to default interactive desktop before Qt initializes its GUI thread
 win32_helper.ensure_default_desktop()
 
+import atexit
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QIcon
 from main_window import MainWindow
+
+# Unconditional fail-safe: Ensure desktop icons are restored on exit or unhandled crash
+atexit.register(lambda: win32_helper.set_desktop_icons_visible(True))
+
+
+def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
+    win32_helper.set_desktop_icons_visible(True)
+    sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+
+sys.excepthook = handle_uncaught_exception
 
 
 def main():

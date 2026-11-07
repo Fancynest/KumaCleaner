@@ -14,94 +14,86 @@ import win32_helper
 
 class ReviewDialog(QDialog):
     """
-    Review dialog displayed when Kuma finishes vacuuming the desktop.
-    Allows user to safely choose what to do with the collected files.
+    Review dialog displayed when vacuum finishes desktop collection.
+    Allows user to select which items to recycle, organize, or restore.
     """
     def __init__(self, collected_items: list[DesktopItem], parent=None):
         super().__init__(parent)
         self.collected_items = collected_items
-        self.selected_action = "cancel"  # "recycle", "folder", "cancel"
+        self.selected_action = "cancel"
         self.init_ui()
 
     def init_ui(self):
-        self.setWindowTitle("🐻 KumaCleaner - Selesai Menyedot Desktop!")
-        self.setMinimumSize(640, 520)
+        self.setWindowTitle("Cleaning Review")
+        self.setMinimumSize(600, 480)
         self.setStyleSheet("""
             QDialog {
-                background-color: #1e1e2e;
-                color: #cdd6f4;
-                font-family: 'Segoe UI', sans-serif;
+                background-color: #0F1013;
+                color: #E2E8F0;
+                font-family: 'Segoe UI', -apple-system, sans-serif;
             }
             QLabel {
-                color: #cdd6f4;
+                color: #E2E8F0;
             }
             QTableWidget {
-                background-color: #181825;
-                border: 1px solid #313244;
-                border-radius: 8px;
-                color: #cdd6f4;
-                gridline-color: #313244;
-                selection-background-color: #45475a;
+                background-color: #16181D;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 6px;
+                color: #CBD5E1;
+                gridline-color: rgba(255, 255, 255, 0.04);
+                selection-background-color: #2D3748;
             }
             QHeaderView::section {
-                background-color: #11111b;
-                color: #a6adc8;
-                padding: 6px;
+                background-color: #111216;
+                color: #64748B;
+                padding: 6px 8px;
                 border: none;
-                font-weight: bold;
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
             }
             QPushButton {
-                padding: 10px 18px;
-                border-radius: 6px;
-                font-size: 13px;
-                font-weight: bold;
+                padding: 9px 16px;
+                border-radius: 5px;
+                font-size: 12px;
+                font-weight: 600;
             }
             QPushButton#btnRecycle {
-                background-color: #f38ba8;
-                color: #11111b;
+                background-color: #EF4444;
+                color: #FFFFFF;
                 border: none;
             }
             QPushButton#btnRecycle:hover {
-                background-color: #eba0ac;
+                background-color: #DC2626;
             }
             QPushButton#btnFolder {
-                background-color: #89b4fa;
-                color: #11111b;
+                background-color: #F8FAFC;
+                color: #0F172A;
                 border: none;
             }
             QPushButton#btnFolder:hover {
-                background-color: #b4befe;
+                background-color: #E2E8F0;
             }
             QPushButton#btnCancel {
-                background-color: #313244;
-                color: #cdd6f4;
-                border: 1px solid #45475a;
+                background-color: transparent;
+                color: #94A3B8;
+                border: 1px solid #334155;
             }
             QPushButton#btnCancel:hover {
-                background-color: #45475a;
+                border-color: #64748B;
+                color: #F1F5F9;
             }
         """)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(14)
+        layout.setSpacing(12)
 
         # Header Title
-        title_box = QHBoxLayout()
-        icon_label = QLabel()
-        assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
-        robot_preview = QPixmap(os.path.join(assets_dir, "robot_vacuum.png"))
-        if not robot_preview.isNull():
-            icon_label.setPixmap(robot_preview.scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        else:
-            icon_label.setText("🤖")
-            icon_label.setFont(QFont("Segoe UI Emoji", 26))
-        title_box.addWidget(icon_label)
-
-        title_text_box = QVBoxLayout()
-        header = QLabel("Pembersihan Desktop Selesai!")
-        header.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-        header.setStyleSheet("color: #f9e2af;")
+        title_box = QVBoxLayout()
+        header = QLabel("Cleaning Review")
+        header.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
+        header.setStyleSheet("color: #F8FAFC;")
 
         total_bytes = sum(it.size_bytes for it in self.collected_items)
         if total_bytes < 1024 * 1024:
@@ -109,29 +101,17 @@ class ReviewDialog(QDialog):
         else:
             size_str = f"{total_bytes / (1024 * 1024):.1f} MB"
 
-        sub = QLabel(f"Robot vacuum berhasil menyedot {len(self.collected_items)} file ({size_str}) ke dustbin.")
-        sub.setStyleSheet("color: #a6adc8; font-size: 13px;")
+        sub = QLabel(f"{len(self.collected_items)} items collected ({size_str}). Physical files remain in place until confirmed.")
+        sub.setStyleSheet("color: #64748B; font-size: 12px;")
 
-        title_text_box.addWidget(header)
-        title_text_box.addWidget(sub)
-        title_box.addLayout(title_text_box)
-        title_box.addStretch()
+        title_box.addWidget(header)
+        title_box.addWidget(sub)
         layout.addLayout(title_box)
-
-        # Instructions / Guardrail note
-        info_banner = QFrame()
-        info_banner.setStyleSheet("background-color: #313244; border-radius: 6px; padding: 6px;")
-        info_layout = QHBoxLayout(info_banner)
-        info_layout.setContentsMargins(10, 6, 10, 6)
-        info_lbl = QLabel("🛡️ <b>Aman:</b> File belum disentuh! Silakan pilih file yang ingin Anda buang atau rapikan ke folder.")
-        info_lbl.setStyleSheet("color: #a6e3a1; font-size: 12px;")
-        info_layout.addWidget(info_lbl)
-        layout.addWidget(info_banner)
 
         # Table of items
         self.table = QTableWidget()
         self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["Pilih", "Nama File", "Ukuran"])
+        self.table.setHorizontalHeaderLabels(["SELECT", "FILE NAME", "SIZE"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -140,7 +120,6 @@ class ReviewDialog(QDialog):
 
         self.checkboxes = []
         for row, item in enumerate(self.collected_items):
-            # Checkbox item
             chk_widget = QWidget()
             chk_layout = QHBoxLayout(chk_widget)
             chk_layout.setContentsMargins(6, 0, 6, 0)
@@ -151,14 +130,12 @@ class ReviewDialog(QDialog):
             self.checkboxes.append(chk)
             self.table.setCellWidget(row, 0, chk_widget)
 
-            # Name item with icon
             name_item = QTableWidgetItem(item.display_name)
             if item.pixmap:
                 name_item.setIcon(QIcon(item.pixmap))
             name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(row, 1, name_item)
 
-            # Size item
             size_item = QTableWidgetItem(item.formatted_size)
             size_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             size_item.setFlags(size_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -166,36 +143,37 @@ class ReviewDialog(QDialog):
 
         layout.addWidget(self.table)
 
-        # Select all / Deselect all links
+        # Toggle all links
         toggle_layout = QHBoxLayout()
-        btn_all = QPushButton("Pilih Semua")
-        btn_all.setStyleSheet("background: transparent; color: #89b4fa; text-decoration: underline; border: none; font-size: 12px;")
+        btn_all = QPushButton("Select all")
+        btn_all.setStyleSheet("background: transparent; color: #38BDF8; border: none; font-size: 11px; padding: 0;")
         btn_all.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_all.clicked.connect(lambda: self._set_all_checks(True))
 
-        btn_none = QPushButton("Hapus Pilihan")
-        btn_none.setStyleSheet("background: transparent; color: #a6adc8; text-decoration: underline; border: none; font-size: 12px;")
+        btn_none = QPushButton("Clear selection")
+        btn_none.setStyleSheet("background: transparent; color: #64748B; border: none; font-size: 11px; padding: 0;")
         btn_none.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_none.clicked.connect(lambda: self._set_all_checks(False))
 
         toggle_layout.addWidget(btn_all)
+        toggle_layout.addSpacing(12)
         toggle_layout.addWidget(btn_none)
         toggle_layout.addStretch()
         layout.addLayout(toggle_layout)
 
         # Action Buttons
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
+        btn_layout.setSpacing(8)
 
-        self.btn_cancel = QPushButton("↩️ Batal & Kembalikan")
+        self.btn_cancel = QPushButton("Cancel")
         self.btn_cancel.setObjectName("btnCancel")
         self.btn_cancel.clicked.connect(self.on_cancel)
 
-        self.btn_folder = QPushButton("📁 Rapikan ke Folder")
+        self.btn_folder = QPushButton("Move to Folder")
         self.btn_folder.setObjectName("btnFolder")
         self.btn_folder.clicked.connect(self.on_folder)
 
-        self.btn_recycle = QPushButton("🗑️ Buang ke Recycle Bin")
+        self.btn_recycle = QPushButton("Recycle")
         self.btn_recycle.setObjectName("btnRecycle")
         self.btn_recycle.clicked.connect(self.on_recycle)
 
@@ -221,40 +199,34 @@ class ReviewDialog(QDialog):
     def on_recycle(self):
         paths = self.get_selected_paths()
         if not paths:
-            QMessageBox.information(self, "Peringatan", "Tidak ada file yang dipilih.")
+            QMessageBox.information(self, "No Selection", "No items selected.")
             return
 
         reply = QMessageBox.question(
             self,
-            "Konfirmasi Recycle Bin",
-            f"Kirim {len(paths)} file terpilih ke Recycle Bin?\n\n(Anda tetap bisa Restore atau tekan Ctrl+Z di Desktop jika berubah pikiran)",
+            "Confirm Recycle",
+            f"Move {len(paths)} selected items to the Recycle Bin?\n\nThis operation can be undone using Ctrl+Z in Windows Explorer.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
             success = win32_helper.safe_recycle_files(paths)
             if success:
-                QMessageBox.information(self, "Sukses!", f"{len(paths)} file berhasil dipindahkan ke Recycle Bin.")
                 self.selected_action = "recycle"
                 self.accept()
             else:
-                QMessageBox.warning(self, "Gagal", "Gagal memindahkan sebagian file ke Recycle Bin.")
+                QMessageBox.warning(self, "Error", "Failed to move one or more items to the Recycle Bin.")
 
     def on_folder(self):
         paths = self.get_selected_paths()
         if not paths:
-            QMessageBox.information(self, "Peringatan", "Tidak ada file yang dipilih.")
+            QMessageBox.information(self, "No Selection", "No items selected.")
             return
 
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
-        target_dir = os.path.join(desktop_dir, f"Kuma_Cleaned_{today_str}")
+        target_dir = os.path.join(desktop_dir, f"Cleaned_{today_str}")
 
-        moved = win32_helper.organize_files_to_folder(paths, target_dir)
-        QMessageBox.information(
-            self,
-            "Sukses Merapikan!",
-            f"{len(moved)} file berhasil dirapikan ke folder:\n{target_dir}"
-        )
+        win32_helper.organize_files_to_folder(paths, target_dir)
         self.selected_action = "folder"
         self.accept()
 
