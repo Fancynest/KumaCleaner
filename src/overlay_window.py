@@ -58,6 +58,7 @@ class OverlayWindow(QWidget):
     STATE_VACUUM = "vacuum"
     STATE_STRAIN = "strain"
     STATE_RETURNING = "returning"
+    STATE_EMPTYING = "emptying"
 
     def __init__(self, items: list[DesktopItem], mode: str = "clean", speed_multiplier: float = 1.0, dpr: float = 1.0):
         super().__init__()
@@ -118,9 +119,16 @@ class OverlayWindow(QWidget):
         self.strain_timer = 0.0
         self.shake_offset = QPointF(0, 0)
 
+        # Dual side brushes & sensor
         self.side_brush_angle = 0.0
         self.laser_sensor_rot = 0.0
         self.particles: list[DebrisParticle] = []
+
+        # Auto-empty station state & dust transfer animation
+        self.empty_timer = 0.0
+        self.empty_duration = 2.4
+        self.dock_shake = QPointF(0, 0)
+        self.empty_particles: list[dict] = []
 
         self._plan_cleaning_route()
 
@@ -128,15 +136,14 @@ class OverlayWindow(QWidget):
         self.timer.timeout.connect(self.game_loop)
         self.last_tick = time.time()
 
-        win32_helper.set_desktop_icons_visible(True)
-
     def _plan_cleaning_route(self):
+        """Greedy nearest-neighbor path to clean desktop in natural sweep."""
         if not self.eligible_items:
             return
 
         unvisited = list(range(len(self.eligible_items)))
         ordered = []
-        cur_x, cur_y = self.dock_x, self.dock_y
+        cur_x, cur_y = self.kuma_x, self.kuma_y
         half_sz = self.icon_sz / 2
 
         while unvisited:
@@ -171,15 +178,17 @@ class OverlayWindow(QWidget):
         self.state_time = 0.0
         self.lidar_radius = 35.0
         self.locked_items.clear()
-        sound_fx.play('ping')
+        sound_fx.play('ping', min_interval=0.12)
 
     def closeEvent(self, event):
+        sound_fx.stop()
         win32_helper.set_desktop_icons_visible(True)
         self.timer.stop()
         super().closeEvent(event)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
+            sound_fx.stop()
             win32_helper.set_desktop_icons_visible(True)
             self.close()
         elif event.key() == Qt.Key.Key_Space:
@@ -211,12 +220,14 @@ class OverlayWindow(QWidget):
 
                 close_btn = QRectF(x + w - 76, y + 5, 68, 28)
                 if close_btn.contains(pos):
+                    sound_fx.stop()
                     win32_helper.set_desktop_icons_visible(True)
                     self.close()
                     return
             else:
                 stop_btn = QRectF(x + w - 90, y + 5, 82, 28)
                 if stop_btn.contains(pos):
+                    sound_fx.stop()
                     win32_helper.set_desktop_icons_visible(True)
                     self.close()
                     return
@@ -239,7 +250,7 @@ class OverlayWindow(QWidget):
         self.last_tick = now
         self.state_time += dt
 
-        brush_speed = 18.0 if self.state == self.STATE_VACUUM else (10.0 if self.state != self.STATE_DOCK else 0.0)
+        brush_speed = 18.0 if self.state == self.STATE_VACUUM else (10.0 if self.state not in (self.STATE_DOCK, self.STATE_EMPTYING) else 0.0)
         self.side_brush_angle += dt * brush_speed
         self.laser_sensor_rot += dt * 12.0
 
@@ -264,6 +275,8 @@ class OverlayWindow(QWidget):
             self._update_strain(dt)
         elif self.state == self.STATE_RETURNING:
             self._update_returning(dt)
+        elif self.state == self.STATE_EMPTYING:
+            self._update_emptying(dt)
 
         self.update()
 
@@ -277,7 +290,7 @@ class OverlayWindow(QWidget):
                 dist = math.hypot(item.x + half_sz - self.kuma_x, item.y + half_sz - self.kuma_y)
                 if dist <= self.lidar_radius:
                     self.locked_items.add(idx)
-                    sound_fx.play('ping')
+                    sound_fx.play('ping', min_interval=0.10)
 
         if self.lidar_radius >= self.lidar_max_radius or self.state_time > 2.8:
             if self.eligible_items:
@@ -289,7 +302,6 @@ class OverlayWindow(QWidget):
     def _update_navigate(self, dt: float):
         if self.current_target_index is None or self.current_target_index >= len(self.eligible_items):
             self.state = self.STATE_RETURNING
-            sound_fx.play('victory')
             return
 
         target = self.eligible_items[self.current_target_index]
@@ -359,7 +371,6 @@ class OverlayWindow(QWidget):
             self.state = self.STATE_NAVIGATE
         else:
             self.state = self.STATE_RETURNING
-            sound_fx.play('victory')
 
     def _update_returning(self, dt: float):
         target_dock_x = self.dock_x
@@ -378,8 +389,60 @@ class OverlayWindow(QWidget):
             self.kuma_x += math.cos(self.kuma_angle) * min(dist, speed)
             self.kuma_y += math.sin(self.kuma_angle) * min(dist, speed)
         else:
-            self.kuma_angle = -math.pi * 0.5
+            self.kuma_x = float(self.dock_x)
+            self.kuma_y = float(self.dock_y + 12)
+            self.kuma_angle = -math.pi * 0.5  # Facing north directly into dock ramp
+
+            # If items were collected, play the auto-empty disposal sequence!
+            if self.sucked_items:
+                self.state = self.STATE_EMPTYING
+                self.empty_timer = 2.4 / max(0.5, self.speed_multiplier)
+                self.empty_duration = self.empty_timer
+                sound_fx.play('empty')
+            else:
+                self.state = self.STATE_DOCK
+                self.timer.stop()
+                sound_fx.play('victory')
+                self.finished_cleaning.emit(self.sucked_items, self.mode)
+
+    def _update_emptying(self, dt: float):
+        self.empty_timer -= dt
+        self.dock_shake = QPointF(
+            random.uniform(-0.8, 0.8),
+            random.uniform(-0.8, 0.8)
+        )
+
+        # Particle stream transferring from vacuum dustbin up into dock canister
+        if random.random() < 0.75:
+            for _ in range(2):
+                self.empty_particles.append({
+                    'x': self.kuma_x + random.uniform(-6, 6),
+                    'y': self.kuma_y - 6,
+                    'tx': self.dock_x + random.uniform(-4, 4),
+                    'ty': self.dock_y - self.dock_h / 2 + 10,
+                    'progress': 0.0,
+                    'speed': random.uniform(2.0, 3.4),
+                    'size': random.uniform(1.4, 2.8),
+                    'color': QColor(
+                        random.randint(180, 230),
+                        random.randint(200, 240),
+                        random.randint(220, 255)
+                    )
+                })
+
+        alive = []
+        for p in self.empty_particles:
+            p['progress'] += dt * p['speed']
+            if p['progress'] < 1.0:
+                alive.append(p)
+        self.empty_particles = alive
+
+        if self.empty_timer <= 0:
+            self.dock_shake = QPointF(0, 0)
+            self.empty_particles.clear()
             self.state = self.STATE_DOCK
+            sound_fx.stop()
+            sound_fx.play('victory')
             self.timer.stop()
             self.finished_cleaning.emit(self.sucked_items, self.mode)
 
@@ -391,30 +454,35 @@ class OverlayWindow(QWidget):
         # 1. Dock Station
         self._draw_dock(painter)
 
-        # 2. Desktop Icons (drawn during cleaning sequence)
+        # 2. Emptying Dust Transfer Particles
+        if self.state == self.STATE_EMPTYING:
+            self._draw_empty_particles(painter)
+
+        # 3. Desktop Icons (drawn during cleaning sequence)
         if self.state != self.STATE_DOCK:
             self._draw_desktop_icons(painter)
 
-        # 3. LiDAR Sweep
+        # 4. LiDAR Sweep
         if self.state == self.STATE_SCAN:
             self._draw_lidar(painter)
 
-        # 4. Debris Particles
+        # 5. Debris Particles
         self._draw_particles(painter)
 
-        # 5. Precision Vector Robot Vacuum
+        # 6. Precision Vector Robot Vacuum
         self._draw_vacuum(painter)
 
-        # 6. Minimalist Architectural HUD
+        # 7. Minimalist Architectural HUD
         self._draw_hud(painter)
 
     def _draw_dock(self, painter: QPainter):
         painter.save()
-        painter.translate(self.dock_x, self.dock_y)
+        painter.translate(self.dock_x + self.dock_shake.x(), self.dock_y + self.dock_shake.y())
 
         w = self.dock_w
         h = self.dock_h
 
+        # Ground contact shadow
         shadow = QRadialGradient(0, 10, w * 0.75)
         shadow.setColorAt(0.0, QColor(0, 0, 0, 110))
         shadow.setColorAt(0.6, QColor(0, 0, 0, 40))
@@ -423,6 +491,7 @@ class OverlayWindow(QWidget):
         painter.setBrush(QBrush(shadow))
         painter.drawEllipse(QRectF(-w * 0.65, -h * 0.45, w * 1.3, h * 1.05))
 
+        # Dock ramp
         ramp_rect = QRectF(-w / 2, -h / 2 + 20, w, h - 20)
         ramp_grad = QLinearGradient(-w / 2, 0, w / 2, 0)
         ramp_grad.setColorAt(0.0, QColor(24, 25, 29))
@@ -433,15 +502,18 @@ class OverlayWindow(QWidget):
         painter.setBrush(QBrush(ramp_grad))
         painter.drawRoundedRect(ramp_rect, 6, 6)
 
+        # Tire alignment guide grooves
         painter.setPen(QPen(QColor(16, 17, 20), 1.5))
         painter.drawLine(int(-w * 0.32), int(-h / 2 + 28), int(-w * 0.32), int(h / 2 - 6))
         painter.drawLine(int(w * 0.32), int(-h / 2 + 28), int(w * 0.32), int(h / 2 - 6))
 
+        # Brass charging contacts
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(QColor(212, 175, 55)))
         painter.drawRoundedRect(QRectF(-12, -h / 2 + 24, 6, 3), 1, 1)
         painter.drawRoundedRect(QRectF(6, -h / 2 + 24, 6, 3), 1, 1)
 
+        # Vertical disposal tower
         tower_rect = QRectF(-w * 0.42, -h / 2, w * 0.84, 26)
         tower_grad = QLinearGradient(0, -h / 2, 0, -h / 2 + 26)
         tower_grad.setColorAt(0.0, QColor(38, 41, 48))
@@ -451,13 +523,47 @@ class OverlayWindow(QWidget):
         painter.setBrush(QBrush(tower_grad))
         painter.drawRoundedRect(tower_rect, 4, 4)
 
-        led_color = QColor(52, 211, 153) if self.state == self.STATE_DOCK else QColor(96, 165, 250)
-        pulse = 0.8 + 0.2 * math.sin(time.time() * 3.5)
+        # Suction channel glow when emptying
+        if self.state == self.STATE_EMPTYING:
+            suction_rect = QRectF(-w * 0.22, -h / 2 + 10, w * 0.44, h * 0.48)
+            channel_grad = QLinearGradient(0, h * 0.3, 0, -h / 2)
+            channel_grad.setColorAt(0.0, QColor(56, 189, 248, 110))
+            channel_grad.setColorAt(0.5, QColor(245, 158, 11, 130))
+            channel_grad.setColorAt(1.0, QColor(56, 189, 248, 0))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(channel_grad))
+            painter.drawRoundedRect(suction_rect, 4, 4)
+
+        # Status pinhole LED
+        if self.state == self.STATE_EMPTYING:
+            led_color = QColor(245, 158, 11) if int(time.time() * 8) % 2 == 0 else QColor(56, 189, 248)
+            pulse = 1.0
+        elif self.state == self.STATE_DOCK:
+            led_color = QColor(52, 211, 153)
+            pulse = 0.8 + 0.2 * math.sin(time.time() * 3.5)
+        else:
+            led_color = QColor(96, 165, 250)
+            pulse = 0.8 + 0.2 * math.sin(time.time() * 3.5)
+
         led_color.setAlpha(int(240 * pulse))
         painter.setBrush(QBrush(led_color))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(QPointF(0, -h / 2 + 7), 1.5, 1.5)
 
+        painter.restore()
+
+    def _draw_empty_particles(self, painter: QPainter):
+        painter.save()
+        painter.setPen(Qt.PenStyle.NoPen)
+        for p in self.empty_particles:
+            prog = p['progress']
+            px = p['x'] * (1.0 - prog) + p['tx'] * prog + math.sin(prog * math.pi * 3) * 3.0
+            py = p['y'] * (1.0 - prog) + p['ty'] * prog
+            alpha = int(240 * math.sin(prog * math.pi))
+            c = QColor(p['color'])
+            c.setAlpha(max(0, min(255, alpha)))
+            painter.setBrush(QBrush(c))
+            painter.drawRect(QRectF(px, py, p['size'], p['size']))
         painter.restore()
 
     def _draw_desktop_icons(self, painter: QPainter):
@@ -491,8 +597,9 @@ class OverlayWindow(QWidget):
                 painter.scale(scale, scale)
                 painter.translate(-(ix + half_sz), -(iy + half_sz))
 
-            if item.is_eligible and idx in self.locked_items and not is_current_target:
-                painter.setPen(QPen(QColor(96, 165, 250, 140), 1.2))
+            # Target lock bracket ONLY on the active target item being vacuumed
+            if is_current_target:
+                painter.setPen(QPen(QColor(56, 189, 248, 160), 1.2))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 cx, cy = ix + half_sz, iy + half_sz
                 sz = half_sz + 4
@@ -505,6 +612,7 @@ class OverlayWindow(QWidget):
                 painter.drawLine(int(cx + sz), int(cy + sz), int(cx + sz - 6), int(cy + sz))
                 painter.drawLine(int(cx + sz), int(cy + sz), int(cx + sz), int(cy + sz - 6))
 
+            # Icon Image
             if item.pixmap:
                 pix_rect = QRectF(ix, iy, self.icon_sz, self.icon_sz)
                 painter.drawPixmap(pix_rect.toRect(), item.pixmap)
@@ -513,21 +621,37 @@ class OverlayWindow(QWidget):
                 painter.setPen(QPen(QColor(70, 75, 85), 1))
                 painter.drawRoundedRect(int(ix + 2), int(iy + 2), int(self.icon_sz - 4), int(self.icon_sz - 4), 4, 4)
 
+            # Native Windows Desktop Icon Label Rendering:
+            # Transparent background (NO ugly black background box!)
+            # 1px soft drop shadow for readability over wallpaper, crisp white text.
             if not is_current_target:
-                font = QFont("Segoe UI", 9)
+                cx = ix + half_sz
+                label_w = 74.0
+                label_h = 32.0
+                text_rect = QRectF(cx - label_w / 2, iy + self.icon_sz + 2, label_w, label_h)
+
+                font = QFont("Segoe UI", 8)
+                font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
                 painter.setFont(font)
 
-                display_text = item.name
-                if len(display_text) > 16:
-                    display_text = display_text[:14] + ".."
+                display_text = item.display_name or item.name
 
-                text_rect = QRectF(ix - 16, iy + self.icon_sz + 3, self.icon_sz + 32, 20)
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QBrush(QColor(15, 16, 20, 210)))
-                painter.drawRoundedRect(text_rect, 3, 3)
+                # 1px Drop Shadow
+                shadow_rect = QRectF(text_rect.x() + 1, text_rect.y() + 1, text_rect.width(), text_rect.height())
+                painter.setPen(QColor(0, 0, 0, 185))
+                painter.drawText(
+                    shadow_rect,
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                    display_text
+                )
 
-                painter.setPen(QColor(230, 232, 238))
-                painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, display_text)
+                # Pure white label text
+                painter.setPen(QColor(255, 255, 255, 245))
+                painter.drawText(
+                    text_rect,
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                    display_text
+                )
 
             painter.restore()
 
@@ -573,6 +697,7 @@ class OverlayWindow(QWidget):
         pos_y = self.kuma_y + self.shake_offset.y()
         r = self.vacuum_radius
 
+        # Drop shadow beneath chassis
         shadow_offset_y = 3.0 + self.lift_height * 14.0
         shadow_scale = 1.0 + self.lift_height * 0.25
         shadow_alpha = int(120 * (1.0 - self.lift_height * 0.4))
@@ -593,9 +718,11 @@ class OverlayWindow(QWidget):
         painter.translate(pos_x, pos_y)
         painter.rotate(math.degrees(self.kuma_angle) + 90)
 
+        # Wheels if picked up
         if self.lift_height > 0.05:
             self._draw_wheels(painter, r)
 
+        # Main Chassis Body
         chassis_grad = QLinearGradient(-r * 0.7, -r * 0.7, r * 0.7, r * 0.7)
         chassis_grad.setColorAt(0.0, QColor(42, 45, 52))
         chassis_grad.setColorAt(0.5, QColor(24, 25, 29))
@@ -605,19 +732,24 @@ class OverlayWindow(QWidget):
         painter.setBrush(QBrush(chassis_grad))
         painter.drawEllipse(QPointF(0, 0), r, r)
 
+        # Front Mechanical Bumper
         painter.setPen(QPen(QColor(14, 15, 17), 1.4))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawArc(QRectF(-r + 1.5, -r + 1.5, (r - 1.5) * 2, (r - 1.5) * 2), int(10 * 16), int(160 * 16))
 
+        # Optical window on front bumper
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(QColor(12, 13, 16)))
         painter.drawRoundedRect(QRectF(-8, -r + 1.5, 16, 2.5), 1, 1)
 
+        # Dustbin Hood Seam
         painter.setPen(QPen(QColor(36, 38, 44), 1.0))
         painter.drawArc(QRectF(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6), int(200 * 16), int(140 * 16))
 
-        self._draw_side_brush(painter, r)
+        # DUAL FRONT SIDE BRUSHES (Left & Right)
+        self._draw_side_brushes(painter, r)
 
+        # Raised LDS LiDAR Turret
         turret_r = 7.5
         turret_shadow = QRadialGradient(0.5, 1.5, turret_r + 2)
         turret_shadow.setColorAt(0.0, QColor(0, 0, 0, 160))
@@ -638,7 +770,8 @@ class OverlayWindow(QWidget):
         painter.setBrush(QBrush(QColor(10, 11, 13)))
         painter.drawEllipse(QPointF(0, 0), turret_r - 2.0, turret_r - 2.0)
 
-        if self.state != self.STATE_DOCK:
+        # Rotating laser sensor diode
+        if self.state not in (self.STATE_DOCK, self.STATE_EMPTYING):
             sensor_x = math.cos(self.laser_sensor_rot) * 3.5
             sensor_y = math.sin(self.laser_sensor_rot) * 3.5
             painter.setBrush(QBrush(QColor(239, 68, 68)))
@@ -648,9 +781,12 @@ class OverlayWindow(QWidget):
         painter.setBrush(QBrush(QColor(26, 28, 33)))
         painter.drawEllipse(QPointF(0, 0), turret_r - 3.2, turret_r - 3.2)
 
+        # LED status ring
         led_color = QColor(52, 211, 153) if self.state == self.STATE_DOCK else QColor(96, 165, 250)
         if self.state == self.STATE_STRAIN:
             led_color = QColor(239, 68, 68)
+        elif self.state == self.STATE_EMPTYING:
+            led_color = QColor(245, 158, 11)
         elif self.is_grabbed:
             led_color = QColor(245, 158, 11)
 
@@ -665,24 +801,28 @@ class OverlayWindow(QWidget):
         if self.is_grabbed:
             self._draw_lift_tag(painter, pos_x, pos_y - r - 18)
 
-    def _draw_side_brush(self, painter: QPainter, r: float):
-        painter.save()
-        bx = r * 0.68
-        by = -r * 0.68
-        painter.translate(bx, by)
-        painter.rotate(math.degrees(self.side_brush_angle))
+    def _draw_side_brushes(self, painter: QPainter, r: float):
+        """Dual front side brushes (Left: clockwise, Right: counter-clockwise)."""
+        brushes = [
+            (-r * 0.68, -r * 0.65, 1.0),   # Left brush
+            (r * 0.68, -r * 0.65, -1.0),   # Right brush
+        ]
+        for bx, by, rot_sign in brushes:
+            painter.save()
+            painter.translate(bx, by)
+            painter.rotate(math.degrees(self.side_brush_angle * rot_sign))
 
-        painter.setPen(QPen(QColor(210, 213, 222), 1.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        for i in range(3):
-            arm_angle = i * (math.pi * 2 / 3)
-            ax = math.cos(arm_angle) * 8.5
-            ay = math.sin(arm_angle) * 8.5
-            painter.drawLine(0, 0, int(ax), int(ay))
+            painter.setPen(QPen(QColor(215, 218, 226), 1.3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            for i in range(3):
+                arm_angle = i * (math.pi * 2 / 3)
+                ax = math.cos(arm_angle) * 8.5
+                ay = math.sin(arm_angle) * 8.5
+                painter.drawLine(0, 0, int(ax), int(ay))
 
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(30, 32, 38)))
-        painter.drawEllipse(QPointF(0, 0), 2.0, 2.0)
-        painter.restore()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(28, 30, 36)))
+            painter.drawEllipse(QPointF(0, 0), 2.2, 2.2)
+            painter.restore()
 
     def _draw_wheels(self, painter: QPainter, r: float):
         painter.save()
@@ -771,19 +911,31 @@ class OverlayWindow(QWidget):
                 self.STATE_NAVIGATE: f"{mode_str} · {len(self.sucked_items)} of {len(self.eligible_items)}",
                 self.STATE_VACUUM: "Vacuuming item...",
                 self.STATE_STRAIN: "High-density item...",
-                self.STATE_RETURNING: "Returning to dock...",
+                self.STATE_RETURNING: "Returning to dock station...",
+                self.STATE_EMPTYING: f"Auto-Emptying Station · Transferring to dock...",
             }
             status_text = state_text_map.get(self.state, "In progress")
 
             pulse_color = QColor(96, 165, 250)
             if self.state == self.STATE_STRAIN:
                 pulse_color = QColor(239, 68, 68)
+            elif self.state == self.STATE_EMPTYING:
+                pulse_color = QColor(245, 158, 11)
+
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(pulse_color))
             painter.drawEllipse(QPointF(x + 20, y + h / 2), 3.5, 3.5)
 
             painter.setPen(QColor(220, 224, 234))
             painter.drawText(QRectF(x + 32, y, 290, h), Qt.AlignmentFlag.AlignVCenter, f"Kuma LDS  ·  {status_text}")
+
+            # Progress bar for emptying
+            if self.state == self.STATE_EMPTYING:
+                p = max(0.0, min(1.0, 1.0 - (self.empty_timer / max(0.1, self.empty_duration))))
+                bar_rect = QRectF(x + 32, y + h - 5, (w - 140) * p, 2)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(QColor(56, 189, 248)))
+                painter.drawRoundedRect(bar_rect, 1, 1)
 
             stop_btn = QRectF(x + w - 90, y + 5, 82, 28)
             painter.setBrush(QBrush(QColor(36, 38, 46)))

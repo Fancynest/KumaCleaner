@@ -207,9 +207,10 @@ def safe_recycle_files(paths: list[str]) -> bool:
 
 FILE_CATEGORIES = {
     'Documents': {'.pdf', '.docx', '.doc', '.txt', '.xlsx', '.xls', '.pptx', '.ppt', '.csv', '.md', '.rtf', '.odt'},
-    'Media': {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.mp4', '.mkv', '.mov', '.avi', '.mp3', '.flac', '.wav', '.m4a'},
+    'Images & Media': {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico', '.mp4', '.mkv', '.mov', '.avi', '.mp3', '.flac', '.wav', '.m4a'},
     'Code & Scripts': {'.py', '.js', '.ts', '.html', '.css', '.json', '.kt', '.java', '.cpp', '.c', '.h', '.bat', '.cmd', '.ps1', '.sh', '.sql', '.php'},
     'Archives & Installers': {'.zip', '.rar', '.7z', '.tar', '.gz', '.iso', '.exe', '.msi'},
+    'Shortcuts': {'.lnk', '.url'},
 }
 
 
@@ -220,13 +221,13 @@ def get_file_category(path: str) -> str:
     for cat_name, extensions in FILE_CATEGORIES.items():
         if ext in extensions:
             return cat_name
-    return 'Miscellaneous'
+    return 'Other Files'
 
 
 def tidy_up_files_categorized(paths: list[str], root_target_folder: str) -> list[str]:
     """
     Tidy up desktop clutter by organizing files into categorized subfolders
-    (Documents, Media, Code & Scripts, Archives, Folders, Miscellaneous).
+    (Folders, Documents, Images & Media, Code & Scripts, Archives & Installers, Shortcuts, Other Files).
     """
     os.makedirs(root_target_folder, exist_ok=True)
     moved = []

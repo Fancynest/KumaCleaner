@@ -14,19 +14,31 @@ import win32_helper
 
 class ReviewDialog(QDialog):
     """
-    Review dialog displayed when vacuum finishes desktop collection.
+    Review dialog displayed when vacuum finishes desktop collection and auto-emptying.
     Allows user to select which items to Tidy Up, Clean (Recycle), or Delete.
     """
     def __init__(self, collected_items: list[DesktopItem], initial_mode: str = "clean", parent=None):
         super().__init__(parent)
-        self.collected_items = collected_items
+        category_order = {
+            'Folders': 0,
+            'Documents': 1,
+            'Images & Media': 2,
+            'Code & Scripts': 3,
+            'Archives & Installers': 4,
+            'Shortcuts': 5,
+            'Other Files': 6
+        }
+        self.collected_items = sorted(
+            collected_items,
+            key=lambda it: (category_order.get(getattr(it, 'category', 'Other Files'), 99), it.display_name.lower())
+        )
         self.initial_mode = initial_mode
         self.selected_action = "cancel"
         self.init_ui()
 
     def init_ui(self):
         self.setWindowTitle("Cleaning Review")
-        self.setMinimumSize(640, 500)
+        self.setMinimumSize(660, 520)
         self.setStyleSheet("""
             QDialog {
                 background-color: #0F1013;
@@ -111,7 +123,7 @@ class ReviewDialog(QDialog):
         else:
             size_str = f"{total_bytes / (1024 * 1024):.1f} MB"
 
-        sub = QLabel(f"{len(self.collected_items)} items collected ({size_str}). Choose how to process your desktop clutter:")
+        sub = QLabel(f"{len(self.collected_items)} items evacuated into dock station ({size_str}). Choose processing action:")
         sub.setStyleSheet("color: #64748B; font-size: 12px;")
 
         title_box.addWidget(header)
@@ -121,7 +133,7 @@ class ReviewDialog(QDialog):
         # Table of items
         self.table = QTableWidget()
         self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["SELECT", "CATEGORY", "FILE NAME", "SIZE"])
+        self.table.setHorizontalHeaderLabels(["SELECT", "CATEGORY", "FILE / FOLDER NAME", "SIZE"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
@@ -141,9 +153,12 @@ class ReviewDialog(QDialog):
             self.checkboxes.append(chk)
             self.table.setCellWidget(row, 0, chk_widget)
 
-            cat_item = QTableWidgetItem(getattr(item, 'category', 'General'))
+            cat_item = QTableWidgetItem(getattr(item, 'category', 'Other Files'))
             cat_item.setFlags(cat_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            cat_item.setForeground(QColor("#94A3B8"))
+            if item.category == 'Folders':
+                cat_item.setForeground(QColor("#FBBF24"))
+            else:
+                cat_item.setForeground(QColor("#94A3B8"))
             self.table.setItem(row, 1, cat_item)
 
             name_item = QTableWidgetItem(item.display_name)
@@ -177,7 +192,7 @@ class ReviewDialog(QDialog):
         toggle_layout.addStretch()
         layout.addLayout(toggle_layout)
 
-        # 3 Action Buttons + Cancel (RoboDust Paradigm: Tidy Up, Clean, Delete)
+        # Action Buttons + Cancel (RoboDust Paradigm: Tidy Up, Clean, Delete)
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
 
@@ -189,7 +204,7 @@ class ReviewDialog(QDialog):
         self.btn_delete.setObjectName("btnDelete")
         self.btn_delete.clicked.connect(self.on_delete)
 
-        self.btn_tidy = QPushButton("Tidy Up (Folder)")
+        self.btn_tidy = QPushButton("Tidy Up (Folders)")
         self.btn_tidy.setObjectName("btnTidy")
         self.btn_tidy.clicked.connect(self.on_tidy)
 
@@ -203,6 +218,17 @@ class ReviewDialog(QDialog):
         btn_layout.addWidget(self.btn_tidy)
         btn_layout.addWidget(self.btn_clean)
         layout.addLayout(btn_layout)
+
+        # Focus preferred mode
+        if self.initial_mode == "tidy":
+            self.btn_tidy.setDefault(True)
+            self.btn_tidy.setFocus()
+        elif self.initial_mode == "delete":
+            self.btn_delete.setDefault(True)
+            self.btn_delete.setFocus()
+        else:
+            self.btn_clean.setDefault(True)
+            self.btn_clean.setFocus()
 
     def _set_all_checks(self, checked: bool):
         for chk in self.checkboxes:
@@ -227,7 +253,7 @@ class ReviewDialog(QDialog):
         reply = QMessageBox.question(
             self,
             "Confirm Clean",
-            f"Move {len(paths)} selected items to the Recycle Bin?\n\nThis operation can be undone using Ctrl+Z in Windows Explorer.",
+            f"Move {len(paths)} selected items to the Windows Recycle Bin?\n\nThis operation can be undone using Ctrl+Z in Windows Explorer.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -253,7 +279,7 @@ class ReviewDialog(QDialog):
         QMessageBox.information(
             self,
             "Tidy Up Complete",
-            f"{len(moved)} items organized into categorized folders in:\n{target_dir}"
+            f"{len(moved)} items organized into categorized folders (Folders, Documents, Media, Code, etc.) in:\n{target_dir}"
         )
         self.selected_action = "tidy"
         self.accept()

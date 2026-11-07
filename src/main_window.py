@@ -390,6 +390,7 @@ class MainWindow(QMainWindow):
         self.refresh_stats()
 
     def emergency_restore(self):
+        sound_fx.stop()
         win32_helper.set_desktop_icons_visible(True)
         QMessageBox.information(
             self,
@@ -398,5 +399,6 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event):
+        sound_fx.stop()
         win32_helper.set_desktop_icons_visible(True)
         super().closeEvent(event)

@@ -2,7 +2,7 @@ import io
 import math
 import struct
 import wave
-import threading
+import time
 import random
 import winsound
 
@@ -16,10 +16,13 @@ class SoundFX:
     def __init__(self, enabled: bool = True):
         self.enabled = enabled
         self._cache = {}
+        self._last_played = {}
         self._pregenerate_sounds()
 
     def set_enabled(self, enabled: bool):
         self.enabled = enabled
+        if not enabled:
+            self.stop()
 
     def _create_wav_bytes(self, samples: list[float], sample_rate: int = 44100) -> bytes:
         buf = io.BytesIO()
@@ -39,18 +42,17 @@ class SoundFX:
         sr = 44100
 
         # 1. Soft Sonar Ping: Warm, resonant marimba/bell ping (880Hz -> 440Hz harmonic decay)
-        duration = 0.22
+        duration = 0.20
         n_samples = int(sr * duration)
         samples = []
         for i in range(n_samples):
             t = i / sr
-            # Smooth attack (4ms) and exponential decay
             attack = min(1.0, t / 0.004)
-            decay = math.exp(-t * 16.0)
+            decay = math.exp(-t * 18.0)
             env = attack * decay
             f1 = 784.0  # G5
             f2 = 1568.0 # G6 harmonic
-            val = (math.sin(2 * math.pi * f1 * t) * 0.75 + math.sin(2 * math.pi * f2 * t) * 0.25) * env * 0.28
+            val = (math.sin(2 * math.pi * f1 * t) * 0.75 + math.sin(2 * math.pi * f2 * t) * 0.25) * env * 0.25
             samples.append(val)
         self._cache['ping'] = self._create_wav_bytes(samples, sr)
 
@@ -64,7 +66,7 @@ class SoundFX:
             decay = math.exp(-t * 45.0)
             env = attack * decay
             freq = 280.0 - 120.0 * (t / duration)
-            val = math.sin(2 * math.pi * freq * t) * env * 0.35
+            val = math.sin(2 * math.pi * freq * t) * env * 0.32
             samples.append(val)
         self._cache['pop'] = self._create_wav_bytes(samples, sr)
 
@@ -75,9 +77,8 @@ class SoundFX:
         for i in range(n_samples):
             t = i / sr
             decay = math.exp(-t * 3.5)
-            # Low hum with smooth modulation
             mod = 1.0 + 0.3 * math.sin(2 * math.pi * 24.0 * t)
-            val = math.sin(2 * math.pi * 68.0 * t) * mod * decay * 0.25
+            val = math.sin(2 * math.pi * 68.0 * t) * mod * decay * 0.22
             samples.append(val)
         self._cache['strain'] = self._create_wav_bytes(samples, sr)
 
@@ -88,15 +89,13 @@ class SoundFX:
         for i in range(n_samples):
             t = i / sr
             val = 0.0
-            # Click 1 at t=0
             if t < 0.04:
                 c_env = math.exp(-t * 120.0)
-                val += math.sin(2 * math.pi * 1200.0 * t) * c_env * 0.3
-            # Click 2 at t=0.05
+                val += math.sin(2 * math.pi * 1200.0 * t) * c_env * 0.28
             if t >= 0.05:
                 t2 = t - 0.05
                 c_env2 = math.exp(-t2 * 120.0)
-                val += math.sin(2 * math.pi * 950.0 * t2) * c_env2 * 0.25
+                val += math.sin(2 * math.pi * 950.0 * t2) * c_env2 * 0.22
             samples.append(val)
         self._cache['squeak'] = self._create_wav_bytes(samples, sr)
 
@@ -115,24 +114,53 @@ class SoundFX:
                     attack = min(1.0, t / 0.005)
                     decay = math.exp(-t * 9.0)
                     env = attack * decay
-                    val = math.sin(2 * math.pi * freq * t) * env * 0.22
+                    val = math.sin(2 * math.pi * freq * t) * env * 0.20
                     samples[idx] += val
         self._cache['victory'] = self._create_wav_bytes(samples, sr)
 
-    def play(self, name: str):
+        # 6. Auto-Empty Station Suction Whoosh: Rushing airflow and cavity suction resonance
+        duration = 1.8
+        n_samples = int(sr * duration)
+        samples = []
+        for i in range(n_samples):
+            t = i / sr
+            if t < 0.25:
+                envelope = t / 0.25
+            elif t > 1.3:
+                envelope = max(0.0, (1.8 - t) / 0.5)
+            else:
+                envelope = 1.0
+            freq = 115.0 + 25.0 * math.sin(math.pi * (t / duration))
+            tone = math.sin(2 * math.pi * freq * t) * 0.35
+            noise = (random.random() * 2.0 - 1.0) * 0.55
+            val = (tone + noise) * envelope * 0.18
+            samples.append(val)
+        self._cache['empty'] = self._create_wav_bytes(samples, sr)
+
+    def play(self, name: str, min_interval: float = 0.0):
         if not self.enabled:
             return
         data = self._cache.get(name)
         if not data:
             return
 
-        def _worker():
-            try:
-                winsound.PlaySound(data, winsound.SND_MEMORY)
-            except Exception:
-                pass
+        now = time.time()
+        if min_interval > 0.0:
+            if (now - self._last_played.get(name, 0.0)) < min_interval:
+                return
+            self._last_played[name] = now
 
-        threading.Thread(target=_worker, daemon=True).start()
+        try:
+            winsound.PlaySound(data, winsound.SND_MEMORY | winsound.SND_ASYNC)
+        except Exception:
+            pass
+
+    def stop(self):
+        """Immediately halts any currently playing or queued sound."""
+        try:
+            winsound.PlaySound(None, winsound.SND_PURGE)
+        except Exception:
+            pass
 
 
 sound_fx = SoundFX(enabled=True)
