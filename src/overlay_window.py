@@ -722,7 +722,10 @@ class OverlayWindow(QWidget):
         if self.lift_height > 0.05:
             self._draw_wheels(painter, r)
 
-        # Main Chassis Body
+        # DUAL FRONT SIDE BRUSHES (Underside mounted, drawn BEFORE chassis so roots are under the hood!)
+        self._draw_side_brushes(painter, r)
+
+        # Main Chassis Body (drawn ON TOP of brushes so brushes emerge from underneath the rim)
         chassis_grad = QLinearGradient(-r * 0.7, -r * 0.7, r * 0.7, r * 0.7)
         chassis_grad.setColorAt(0.0, QColor(42, 45, 52))
         chassis_grad.setColorAt(0.5, QColor(24, 25, 29))
@@ -745,9 +748,6 @@ class OverlayWindow(QWidget):
         # Dustbin Hood Seam
         painter.setPen(QPen(QColor(36, 38, 44), 1.0))
         painter.drawArc(QRectF(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6), int(200 * 16), int(140 * 16))
-
-        # DUAL FRONT SIDE BRUSHES (Left & Right)
-        self._draw_side_brushes(painter, r)
 
         # Raised LDS LiDAR Turret
         turret_r = 7.5
@@ -802,26 +802,57 @@ class OverlayWindow(QWidget):
             self._draw_lift_tag(painter, pos_x, pos_y - r - 18)
 
     def _draw_side_brushes(self, painter: QPainter, r: float):
-        """Dual front side brushes (Left: clockwise, Right: counter-clockwise)."""
+        """
+        Dual front side brushes mounted on the underside.
+        Drawn BEFORE the chassis so only the protruding bristles emerge from under the rim.
+        """
+        # Underside front-left and front-right mounting hubs
         brushes = [
-            (-r * 0.68, -r * 0.65, 1.0),   # Left brush
-            (r * 0.68, -r * 0.65, -1.0),   # Right brush
+            (-r * 0.70, -r * 0.60, 1.0),   # Left brush, clockwise sweep
+            (r * 0.70, -r * 0.60, -1.0),   # Right brush, counter-clockwise sweep
         ]
+
+        arm_len = 15.5  # Enlarged bristle arm reach
+
         for bx, by, rot_sign in brushes:
             painter.save()
             painter.translate(bx, by)
             painter.rotate(math.degrees(self.side_brush_angle * rot_sign))
 
-            painter.setPen(QPen(QColor(215, 218, 226), 1.3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            # Ground drop shadow for protruding bristles
+            painter.setPen(QPen(QColor(0, 0, 0, 85), 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             for i in range(3):
                 arm_angle = i * (math.pi * 2 / 3)
-                ax = math.cos(arm_angle) * 8.5
-                ay = math.sin(arm_angle) * 8.5
+                ax = math.cos(arm_angle) * arm_len
+                ay = math.sin(arm_angle) * arm_len + 1.2
+                painter.drawLine(0, 1, int(ax), int(ay))
+
+            # Primary flexible nylon bristle arms
+            painter.setPen(QPen(QColor(225, 228, 236), 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            for i in range(3):
+                arm_angle = i * (math.pi * 2 / 3)
+                ax = math.cos(arm_angle) * arm_len
+                ay = math.sin(arm_angle) * arm_len
                 painter.drawLine(0, 0, int(ax), int(ay))
 
+                # Bristle tuft tip spread for realistic sweep appearance
+                tip_a1 = arm_angle + 0.22
+                tip_a2 = arm_angle - 0.22
+                painter.drawLine(
+                    int(ax), int(ay),
+                    int(ax + math.cos(tip_a1) * 3.5),
+                    int(ay + math.sin(tip_a1) * 3.5)
+                )
+                painter.drawLine(
+                    int(ax), int(ay),
+                    int(ax + math.cos(tip_a2) * 3.5),
+                    int(ay + math.sin(tip_a2) * 3.5)
+                )
+
+            # Underside brush hub pivot
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor(28, 30, 36)))
-            painter.drawEllipse(QPointF(0, 0), 2.2, 2.2)
+            painter.setBrush(QBrush(QColor(24, 26, 30)))
+            painter.drawEllipse(QPointF(0, 0), 2.8, 2.8)
             painter.restore()
 
     def _draw_wheels(self, painter: QPainter, r: float):
