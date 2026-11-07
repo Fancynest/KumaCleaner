@@ -120,6 +120,11 @@ class OverlayWindow(QWidget):
         self.linear_decel = 150.0      # Smooth cushion braking (px/sec^2)
         self.bypass_waypoint: Optional[tuple[float, float]] = None
 
+        # Multi-stage silky docking runway state
+        self.return_stage = 0          # 0: approach outer runway, 1: glide down runway to portal
+        self.align_pause = 0.0         # Mechanical settling pause before/after rotation
+        self.reverse_speed = 0.0       # Smooth ease-in reverse speed
+
         # Robot grab state
         self.is_grabbed = False
         self.grab_offset_x = 0.0
@@ -173,8 +178,12 @@ class OverlayWindow(QWidget):
         )
 
     def get_dock_approach_point(self) -> tuple[float, float]:
-        """Dedicated access corridor portal in front of the dock entrance ramp (faces North into room)."""
-        return (float(self.dock_x), float(self.dock_y - 70.0))
+        """Inner docking portal in front of the ramp entrance (faces North into room)."""
+        return (float(self.dock_x), float(self.dock_y - 65.0))
+
+    def get_dock_runway_waypoint(self) -> tuple[float, float]:
+        """Outer docking runway approach point for smooth lead-in alignment."""
+        return (float(self.dock_x), float(self.dock_y - 120.0))
 
     def get_dock_obstacle_rect(self) -> QRectF:
         """Solid physical obstacle boundary of the dock station."""
@@ -561,6 +570,9 @@ class OverlayWindow(QWidget):
         """Realistic differential-drive kinematics with smooth acceleration, turning, and braking."""
         if self.current_target_index is None or self.current_target_index >= len(self.eligible_items):
             self.state = self.STATE_RETURNING
+            self.return_stage = 0
+            self.align_pause = 0.0
+            self.reverse_speed = 0.0
             self.bypass_waypoint = None
             return
 
@@ -661,18 +673,34 @@ class OverlayWindow(QWidget):
             self.state = self.STATE_NAVIGATE
         else:
             self.state = self.STATE_RETURNING
+            self.return_stage = 0
+            self.align_pause = 0.0
+            self.reverse_speed = 0.0
             self.bypass_waypoint = None
 
     def _update_returning(self, dt: float):
-        """Navigate to the front access point of the dock corridor (above dock), avoiding dock walls."""
-        approach_pt = self.get_dock_approach_point()
+        """Silky-smooth two-stage docking approach avoiding dock walls and eliminating sudden stops."""
+        portal_pt = self.get_dock_approach_point()
+        runway_pt = self.get_dock_runway_waypoint()
 
-        # Check if robot is currently behind or beside the dock, or heading through dock
-        target_x, target_y = approach_pt
-        if (self.kuma_y > self.dock_y - 35.0 and abs(self.kuma_x - self.dock_x) < 70.0) or \
-           self._line_intersects_dock((self.kuma_x, self.kuma_y), approach_pt):
-            side_x = self.dock_x - 74.0 if self.kuma_x < self.dock_x else self.dock_x + 74.0
-            target_x, target_y = side_x, self.dock_y - 65.0
+        # Stage 0: Approaching outer docking runway from the desktop room
+        if self.return_stage == 0:
+            target_x, target_y = runway_pt
+
+            # Obstacle avoidance: if robot is behind/beside the dock or heading crosses dock
+            if (self.kuma_y > self.dock_y - 35.0 and abs(self.kuma_x - self.dock_x) < 70.0) or \
+               self._line_intersects_dock((self.kuma_x, self.kuma_y), runway_pt):
+                side_x = self.dock_x - 76.0 if self.kuma_x < self.dock_x else self.dock_x + 76.0
+                target_x, target_y = side_x, self.dock_y - 125.0
+
+            dist_to_runway = math.hypot(self.kuma_x - runway_pt[0], self.kuma_y - runway_pt[1])
+            # If already near runway or above dock corridor, smoothly enter Stage 1 (glide down runway)
+            if dist_to_runway <= 28.0 or (self.kuma_y <= self.dock_y - 105.0 and abs(self.kuma_x - self.dock_x) <= 24.0):
+                self.return_stage = 1
+                target_x, target_y = portal_pt
+        else:
+            # Stage 1: Gliding down the straight docking runway into the ramp portal
+            target_x, target_y = portal_pt
 
         dx = target_x - self.kuma_x
         dy = target_y - self.kuma_y
@@ -681,19 +709,30 @@ class OverlayWindow(QWidget):
         desired_angle = math.atan2(dy, dx)
         diff = (desired_angle - self.kuma_angle + math.pi) % (2 * math.pi) - math.pi
 
-        if abs(diff) > math.radians(20):
-            target_speed = 12.0
+        # Steering dynamics: smooth steering curve, slow down for turns
+        if abs(diff) > math.radians(25):
+            target_speed = 10.0
             turn_rate = min(abs(diff), self.max_turn_speed * dt)
             self.kuma_angle += math.copysign(turn_rate, diff)
             self.wheel_spin_angle += turn_rate * 6.0
         else:
-            self.kuma_angle += diff * min(1.0, dt * 4.0)
+            self.kuma_angle += diff * min(1.0, dt * 4.5)
             cos_align = max(0.2, math.cos(diff))
-            if dist > 60.0:
-                target_speed = self.max_cruise_speed * cos_align
+            if self.return_stage == 0:
+                if dist > 60.0:
+                    target_speed = self.max_cruise_speed * cos_align
+                else:
+                    target_speed = max(24.0, self.max_cruise_speed * (dist / 60.0) * cos_align)
             else:
-                target_speed = max(18.0, self.max_cruise_speed * (dist / 60.0) * cos_align)
+                # Stage 1: Gliding down runway - progressive ease-out curve to zero
+                prog = max(0.0, min(1.0, dist / 55.0))
+                target_speed = max(2.5, 32.0 * (prog ** 1.2) * cos_align)
 
+        # Centerline micro-alignment during runway descent
+        if self.return_stage == 1:
+            self.kuma_x += (portal_pt[0] - self.kuma_x) * min(1.0, dt * 6.0)
+
+        # Smooth linear acceleration and braking
         if self.kuma_speed < target_speed:
             self.kuma_speed = min(target_speed, self.kuma_speed + self.linear_accel * dt)
         else:
@@ -704,41 +743,71 @@ class OverlayWindow(QWidget):
         self.kuma_y += math.sin(self.kuma_angle) * move_step
         self.wheel_spin_angle += self.kuma_speed * dt * 0.8
 
-        # Arrived at the front access corridor waypoint!
-        dist_to_portal = math.hypot(self.kuma_x - approach_pt[0], self.kuma_y - approach_pt[1])
-        if dist_to_portal <= 8.0:
-            self.kuma_speed = 0.0
-            self.kuma_x = float(approach_pt[0])
-            self.kuma_y = float(approach_pt[1])
-            self.state = self.STATE_DOCK_ALIGN
+        # Smooth arrival check at the docking portal (NO teleporting/snapping!)
+        if self.return_stage == 1:
+            dist_to_portal = math.hypot(self.kuma_x - portal_pt[0], self.kuma_y - portal_pt[1])
+            if dist_to_portal <= 3.0 or (self.kuma_y >= portal_pt[1] and self.kuma_speed <= 6.0):
+                self.kuma_speed = 0.0
+                self.state = self.STATE_DOCK_ALIGN
+                self.align_pause = 0.15  # Mechanical settle pause before turning
+                self.reverse_speed = 0.0
 
     def _update_dock_align(self, dt: float):
-        """Rotate on spot in front of dock corridor so rear faces South (into dock entrance)."""
+        """Rotate on spot with ease-in/ease-out so rear faces South into dock entrance."""
+        if self.align_pause > 0.0:
+            self.align_pause -= dt
+            return
+
         target_angle = -math.pi * 0.5  # Facing North (front pointing up, rear pointing down into ramp)
         diff = (target_angle - self.kuma_angle + math.pi) % (2 * math.pi) - math.pi
 
-        turn_rate = min(abs(diff), self.max_turn_speed * dt * 0.75)
-        self.kuma_angle += math.copysign(turn_rate, diff)
-        self.wheel_spin_angle += turn_rate * 8.0
+        # Sinusoidal ease-out angular velocity: fast in the middle, gentle at start and finish
+        abs_diff = abs(diff)
+        angular_speed = max(0.35, min(1.8, abs_diff * 3.2))
+        turn_step = min(abs_diff, angular_speed * dt)
+        self.kuma_angle += math.copysign(turn_step, diff)
+        self.wheel_spin_angle += turn_step * 8.0
 
-        if abs(diff) < math.radians(3.0):
+        # Centerline micro-convergence during turn
+        self.kuma_x += (self.dock_x - self.kuma_x) * min(1.0, dt * 5.0)
+
+        if abs_diff < math.radians(2.0):
             self.kuma_angle = -math.pi * 0.5
+            self.kuma_x = float(self.dock_x)
             self.state = self.STATE_DOCK_REVERSE
+            self.reverse_speed = 0.0
+            self.align_pause = 0.12  # Subtle transmission pause before reverse begins
             sound_fx.play('squeak')
 
     def _update_dock_reverse(self, dt: float):
         """Reverse smoothly backwards down the dock ramp into charging contacts and waste tower."""
-        self.kuma_x = float(self.dock_x)  # Locked along corridor centerline
-        self.kuma_angle = -math.pi * 0.5  # Facing North (rear pointing South)
+        if self.align_pause > 0.0:
+            self.align_pause -= dt
+            return
 
-        reverse_speed = 22.0 * dt          # Slow, steady, realistic crawl backwards
-        self.kuma_y += reverse_speed
-        self.wheel_spin_angle -= dt * 6.0
+        self.kuma_x += (self.dock_x - self.kuma_x) * min(1.0, dt * 8.0)
+        self.kuma_angle = -math.pi * 0.5
+
+        # Ease-in acceleration from 0 up to 20 px/s
+        target_reverse = 20.0
+        rem_dist = (self.dock_y - 10.0) - self.kuma_y
+        if rem_dist < 12.0:
+            # Cushion ease-out as it touches charging contacts
+            target_reverse = max(5.0, 20.0 * (max(0.1, rem_dist) / 12.0))
+
+        if self.reverse_speed < target_reverse:
+            self.reverse_speed = min(target_reverse, self.reverse_speed + 45.0 * dt)
+        else:
+            self.reverse_speed = max(target_reverse, self.reverse_speed - 60.0 * dt)
+
+        self.kuma_y += self.reverse_speed * dt
+        self.wheel_spin_angle -= self.reverse_speed * dt * 0.3
         self.side_brush_angle -= dt * 1.5
 
         # Docking resting position reached (against disposal tower at bottom)
         if self.kuma_y >= self.dock_y - 10.0:
             self.kuma_y = float(self.dock_y - 10.0)
+            self.reverse_speed = 0.0
             sound_fx.play('pop')  # Latch click on contacts
 
             if self.sucked_items:
