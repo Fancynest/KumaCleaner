@@ -102,22 +102,22 @@ class OverlayWindow(QWidget):
             self.dock_x, self.dock_y = OverlayWindow.SAVED_DOCK_POS
         else:
             self.dock_x = float(self.screen_w - 90)
-            self.dock_y = float(self.screen_h - 105)
+            self.dock_y = float(self.screen_h - 68)
 
-        # Resting position on dock: docked in reverse, facing South (into desktop)
+        # Resting position on dock: seated against disposal tower at bottom, facing North (into desktop)
         self.kuma_x = float(self.dock_x)
-        self.kuma_y = float(self.dock_y + 12)
-        self.kuma_angle = math.pi * 0.5  # Facing South (out into the room)
+        self.kuma_y = float(self.dock_y - 10.0)
+        self.kuma_angle = -math.pi * 0.5  # Facing North (out into desktop room)
 
         self.state = self.STATE_DOCK
         self.state_time = 0.0
 
-        # Differential Drive Kinematics & Momentum
+        # Differential Drive Kinematics & Momentum (Calibrated to realistic robotic vacuum speeds)
         self.kuma_speed = 0.0          # Current forward linear speed (px/sec)
-        self.max_cruise_speed = 195.0  # Natural, realistic cruising speed
-        self.max_turn_speed = 4.2      # Angular rotation speed (rad/sec)
-        self.linear_accel = 320.0      # Linear acceleration (px/sec^2)
-        self.linear_decel = 450.0      # Braking deceleration (px/sec^2)
+        self.max_cruise_speed = 78.0   # Calm, steady, realistic robot vacuum glide (px/sec)
+        self.max_turn_speed = 2.0      # Deliberate differential chassis turn rate (rad/sec ~ 115 deg/sec)
+        self.linear_accel = 100.0      # Gentle, weighted motor acceleration (px/sec^2)
+        self.linear_decel = 150.0      # Smooth cushion braking (px/sec^2)
         self.bypass_waypoint: Optional[tuple[float, float]] = None
 
         # Robot grab state
@@ -173,8 +173,8 @@ class OverlayWindow(QWidget):
         )
 
     def get_dock_approach_point(self) -> tuple[float, float]:
-        """Dedicated access corridor portal in front of the dock entrance ramp."""
-        return (float(self.dock_x), float(self.dock_y + 70.0))
+        """Dedicated access corridor portal in front of the dock entrance ramp (faces North into room)."""
+        return (float(self.dock_x), float(self.dock_y - 70.0))
 
     def get_dock_obstacle_rect(self) -> QRectF:
         """Solid physical obstacle boundary of the dock station."""
@@ -182,7 +182,7 @@ class OverlayWindow(QWidget):
         h = float(self.dock_h)
         return QRectF(
             self.dock_x - w / 2 - 14,
-            self.dock_y - h / 2 - 14,
+            self.dock_y - h / 2 + 6,
             w + 28,
             h + 8
         )
@@ -190,8 +190,8 @@ class OverlayWindow(QWidget):
     def _line_intersects_dock(self, p1: tuple[float, float], p2: tuple[float, float]) -> bool:
         """Check if line segment p1-p2 passes through the solid dock station boundary."""
         pad_x = self.dock_w * 0.5 + self.vacuum_radius + 4.0
-        pad_y_top = self.dock_h * 0.5 + self.vacuum_radius + 4.0
-        pad_y_bot = self.dock_h * 0.5 - 6.0
+        pad_y_top = self.dock_h * 0.5 - 6.0                      # Ramp mouth facing North into room
+        pad_y_bot = self.dock_h * 0.5 + self.vacuum_radius + 4.0  # Disposal tower rear facing South (taskbar)
 
         left = self.dock_x - pad_x
         right = self.dock_x + pad_x
@@ -238,15 +238,18 @@ class OverlayWindow(QWidget):
 
         # Solid dock obstacle footprint (width 66, height 82, robot radius 26)
         pad_x = (self.dock_w * 0.5) + self.vacuum_radius - 2.0
-        top_y = self.dock_y - (self.dock_h * 0.5) - self.vacuum_radius
-        bot_y = self.dock_y + (self.dock_h * 0.5) - 6.0
+        top_y = self.dock_y - (self.dock_h * 0.5) + 6.0
+        bot_y = self.dock_y + (self.dock_h * 0.5) + self.vacuum_radius
 
         if abs(self.kuma_x - self.dock_x) < pad_x and top_y < self.kuma_y < bot_y:
             dx_left = self.kuma_x - (self.dock_x - pad_x)
             dx_right = (self.dock_x + pad_x) - self.kuma_x
+            dy_bot = bot_y - self.kuma_y
             dy_top = self.kuma_y - top_y
 
-            if dy_top < dx_left and dy_top < dx_right and self.kuma_y < self.dock_y:
+            if dy_bot < dx_left and dy_bot < dx_right and self.kuma_y > self.dock_y:
+                self.kuma_y = bot_y
+            elif dy_top < dx_left and dy_top < dx_right and self.kuma_y < self.dock_y:
                 self.kuma_y = top_y
             elif dx_left < dx_right:
                 self.kuma_x = self.dock_x - pad_x
@@ -352,9 +355,9 @@ class OverlayWindow(QWidget):
 
             if self.state in (self.STATE_DOCK, self.STATE_EMPTYING):
                 # When robot is docked:
-                # - Clicking on dock tower (upper portion) or dock sides grabs the DOCK (moves dock + robot together)
+                # - Clicking on dock tower (lower portion near taskbar) or dock sides grabs the DOCK (moves dock + robot together)
                 # - Clicking directly on robot lifts the robot off the dock
-                if is_on_dock and (pos.y() < self.dock_y + 4 or not is_on_kuma):
+                if is_on_dock and (pos.y() > self.dock_y - 4 or not is_on_kuma):
                     self.is_dock_grabbed = True
                     self.dock_grab_offset_x = self.dock_x - pos.x()
                     self.dock_grab_offset_y = self.dock_y - pos.y()
@@ -406,8 +409,8 @@ class OverlayWindow(QWidget):
             new_y = pos.y() + self.dock_grab_offset_y
 
             margin_x = self.dock_w / 2 + 36
-            margin_y_top = self.dock_h / 2 + 36
-            margin_y_bottom = self.dock_h / 2 + 76.0
+            margin_y_top = self.dock_h / 2 + 76.0
+            margin_y_bottom = self.dock_h / 2 + 16.0
 
             self.dock_x = max(margin_x, min(self.screen_w - margin_x, new_x))
             self.dock_y = max(margin_y_top, min(self.screen_h - margin_y_bottom, new_y))
@@ -417,7 +420,7 @@ class OverlayWindow(QWidget):
             # Move docked vacuum synchronously with dock
             if self.state in (self.STATE_DOCK, self.STATE_EMPTYING):
                 self.kuma_x = float(self.dock_x)
-                self.kuma_y = float(self.dock_y + 12)
+                self.kuma_y = float(self.dock_y - 10.0)
 
             self.update()
             return
@@ -438,7 +441,7 @@ class OverlayWindow(QWidget):
         old_hover = self.is_dock_hovered
         self.is_dock_hovered = is_on_dock
 
-        if is_on_dock and (self.state != self.STATE_DOCK or pos.y() < self.dock_y + 4 or not is_on_kuma):
+        if is_on_dock and (self.state != self.STATE_DOCK or pos.y() > self.dock_y - 4 or not is_on_kuma):
             self.setCursor(Qt.CursorShape.SizeAllCursor)
         elif is_on_kuma:
             self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -459,11 +462,11 @@ class OverlayWindow(QWidget):
             if self.is_grabbed:
                 self.is_grabbed = False
                 # If released near the dock station, snap smoothly back onto the dock ramp!
-                dist_to_dock = math.hypot(self.kuma_x - self.dock_x, self.kuma_y - (self.dock_y + 12))
+                dist_to_dock = math.hypot(self.kuma_x - self.dock_x, self.kuma_y - (self.dock_y - 10.0))
                 if dist_to_dock < 48.0:
                     self.kuma_x = float(self.dock_x)
-                    self.kuma_y = float(self.dock_y + 12)
-                    self.kuma_angle = math.pi * 0.5
+                    self.kuma_y = float(self.dock_y - 10.0)
+                    self.kuma_angle = -math.pi * 0.5
                     self.state = self.STATE_DOCK
                     sound_fx.play('pop')
 
@@ -540,17 +543,17 @@ class OverlayWindow(QWidget):
                 self.state = self.STATE_DOCK
 
     def _update_departing(self, dt: float):
-        """Roll forward out of the dock ramp along the dedicated single-access corridor."""
+        """Roll forward out of the dock ramp along the dedicated single-access corridor (North into room)."""
         approach_pt = self.get_dock_approach_point()
-        self.kuma_angle = math.pi * 0.5  # Facing South (out into open space)
+        self.kuma_angle = -math.pi * 0.5  # Facing North (out into desktop)
         self.kuma_x = float(self.dock_x)  # Locked to center corridor
 
-        target_speed = 130.0
+        target_speed = 38.0  # Calm, steady roll out down the ramp
         self.kuma_speed = min(target_speed, self.kuma_speed + self.linear_accel * dt)
-        self.kuma_y += self.kuma_speed * dt
+        self.kuma_y -= self.kuma_speed * dt
         self.wheel_spin_angle += self.kuma_speed * dt * 0.8
 
-        if self.kuma_y >= approach_pt[1] - 8.0:
+        if self.kuma_y <= approach_pt[1] + 8.0:
             # Corridor cleared! Transition to realistic differential-drive navigation
             self.state = self.STATE_NAVIGATE
 
@@ -566,15 +569,12 @@ class OverlayWindow(QWidget):
         tx = target.x + half_sz
         ty = target.y + half_sz
 
-        # Dock obstacle avoidance: If straight line passes through solid dock walls, route around exterior
+        # Dock obstacle avoidance: If heading passes through solid dock walls, route around exterior
         dest_x, dest_y = tx, ty
-        if (self.kuma_y < self.dock_y + 35.0 and abs(self.kuma_x - self.dock_x) < 70.0) or \
+        if (self.kuma_y > self.dock_y - 35.0 and abs(self.kuma_x - self.dock_x) < 70.0) or \
            self._line_intersects_dock((self.kuma_x, self.kuma_y), (tx, ty)):
             side_x = self.dock_x - 74.0 if self.kuma_x < self.dock_x else self.dock_x + 74.0
-            if self.kuma_y < self.dock_y - 25.0:
-                dest_x, dest_y = side_x, self.dock_y - 45.0
-            else:
-                dest_x, dest_y = side_x, self.dock_y + 65.0
+            dest_x, dest_y = side_x, self.dock_y - 65.0
 
         dx = dest_x - self.kuma_x
         dy = dest_y - self.kuma_y
@@ -583,19 +583,20 @@ class OverlayWindow(QWidget):
         desired_angle = math.atan2(dy, dx)
         diff = (desired_angle - self.kuma_angle + math.pi) % (2 * math.pi) - math.pi
 
-        # Steering dynamics: slow down for sharp turns, turn wheels proportionally
-        if abs(diff) > math.radians(50):
-            target_speed = 25.0
+        # Steering dynamics: differential drive turns on spot for sharp angle, slows down
+        if abs(diff) > math.radians(20):
+            target_speed = 12.0
             turn_rate = min(abs(diff), self.max_turn_speed * dt)
             self.kuma_angle += math.copysign(turn_rate, diff)
+            self.wheel_spin_angle += turn_rate * 6.0
         else:
-            self.kuma_angle += diff * min(1.0, dt * 5.5)
-            cos_align = max(0.15, math.cos(diff))
-            if dist > 80.0:
+            self.kuma_angle += diff * min(1.0, dt * 4.0)
+            cos_align = max(0.2, math.cos(diff))
+            if dist > 60.0:
                 target_speed = self.max_cruise_speed * cos_align
             else:
                 # Gentle braking deceleration as vacuum nears the target
-                target_speed = max(38.0, self.max_cruise_speed * (dist / 80.0) * cos_align)
+                target_speed = max(18.0, self.max_cruise_speed * (dist / 60.0) * cos_align)
 
         # Smooth linear acceleration and braking
         if self.kuma_speed < target_speed:
@@ -663,18 +664,15 @@ class OverlayWindow(QWidget):
             self.bypass_waypoint = None
 
     def _update_returning(self, dt: float):
-        """Navigate to the front access point of the dock corridor, avoiding dock side walls."""
+        """Navigate to the front access point of the dock corridor (above dock), avoiding dock walls."""
         approach_pt = self.get_dock_approach_point()
 
         # Check if robot is currently behind or beside the dock, or heading through dock
         target_x, target_y = approach_pt
-        if (self.kuma_y < self.dock_y + 35.0 and abs(self.kuma_x - self.dock_x) < 70.0) or \
+        if (self.kuma_y > self.dock_y - 35.0 and abs(self.kuma_x - self.dock_x) < 70.0) or \
            self._line_intersects_dock((self.kuma_x, self.kuma_y), approach_pt):
             side_x = self.dock_x - 74.0 if self.kuma_x < self.dock_x else self.dock_x + 74.0
-            if self.kuma_y < self.dock_y - 25.0:
-                target_x, target_y = side_x, self.dock_y - 45.0
-            else:
-                target_x, target_y = side_x, self.dock_y + 60.0
+            target_x, target_y = side_x, self.dock_y - 65.0
 
         dx = target_x - self.kuma_x
         dy = target_y - self.kuma_y
@@ -683,17 +681,18 @@ class OverlayWindow(QWidget):
         desired_angle = math.atan2(dy, dx)
         diff = (desired_angle - self.kuma_angle + math.pi) % (2 * math.pi) - math.pi
 
-        if abs(diff) > math.radians(45):
-            target_speed = 25.0
+        if abs(diff) > math.radians(20):
+            target_speed = 12.0
             turn_rate = min(abs(diff), self.max_turn_speed * dt)
             self.kuma_angle += math.copysign(turn_rate, diff)
+            self.wheel_spin_angle += turn_rate * 6.0
         else:
-            self.kuma_angle += diff * min(1.0, dt * 5.5)
+            self.kuma_angle += diff * min(1.0, dt * 4.0)
             cos_align = max(0.2, math.cos(diff))
             if dist > 60.0:
                 target_speed = self.max_cruise_speed * cos_align
             else:
-                target_speed = max(30.0, self.max_cruise_speed * (dist / 60.0) * cos_align)
+                target_speed = max(18.0, self.max_cruise_speed * (dist / 60.0) * cos_align)
 
         if self.kuma_speed < target_speed:
             self.kuma_speed = min(target_speed, self.kuma_speed + self.linear_accel * dt)
@@ -707,39 +706,39 @@ class OverlayWindow(QWidget):
 
         # Arrived at the front access corridor waypoint!
         dist_to_portal = math.hypot(self.kuma_x - approach_pt[0], self.kuma_y - approach_pt[1])
-        if dist_to_portal <= 10.0:
+        if dist_to_portal <= 8.0:
             self.kuma_speed = 0.0
             self.kuma_x = float(approach_pt[0])
             self.kuma_y = float(approach_pt[1])
             self.state = self.STATE_DOCK_ALIGN
 
     def _update_dock_align(self, dt: float):
-        """Rotate on spot in front of dock corridor so rear faces North into dock entrance."""
-        target_angle = math.pi * 0.5  # Facing South, so rear points North into ramp
+        """Rotate on spot in front of dock corridor so rear faces South (into dock entrance)."""
+        target_angle = -math.pi * 0.5  # Facing North (front pointing up, rear pointing down into ramp)
         diff = (target_angle - self.kuma_angle + math.pi) % (2 * math.pi) - math.pi
 
         turn_rate = min(abs(diff), self.max_turn_speed * dt * 0.75)
         self.kuma_angle += math.copysign(turn_rate, diff)
-        self.wheel_spin_angle += turn_rate * 14.0
+        self.wheel_spin_angle += turn_rate * 8.0
 
-        if abs(diff) < math.radians(4.0):
-            self.kuma_angle = math.pi * 0.5
+        if abs(diff) < math.radians(3.0):
+            self.kuma_angle = -math.pi * 0.5
             self.state = self.STATE_DOCK_REVERSE
             sound_fx.play('squeak')
 
     def _update_dock_reverse(self, dt: float):
-        """Reverse smoothly backwards up the dock ramp into charging contacts."""
+        """Reverse smoothly backwards down the dock ramp into charging contacts and waste tower."""
         self.kuma_x = float(self.dock_x)  # Locked along corridor centerline
-        self.kuma_angle = math.pi * 0.5   # Rear pointing North
+        self.kuma_angle = -math.pi * 0.5  # Facing North (rear pointing South)
 
-        reverse_speed = 46.0 * dt
-        self.kuma_y -= reverse_speed
-        self.wheel_spin_angle -= dt * 12.0
-        self.side_brush_angle -= dt * 2.0
+        reverse_speed = 22.0 * dt          # Slow, steady, realistic crawl backwards
+        self.kuma_y += reverse_speed
+        self.wheel_spin_angle -= dt * 6.0
+        self.side_brush_angle -= dt * 1.5
 
-        # Docking resting position reached
-        if self.kuma_y <= self.dock_y + 12.0:
-            self.kuma_y = float(self.dock_y + 12.0)
+        # Docking resting position reached (against disposal tower at bottom)
+        if self.kuma_y >= self.dock_y - 10.0:
+            self.kuma_y = float(self.dock_y - 10.0)
             sound_fx.play('pop')  # Latch click on contacts
 
             if self.sucked_items:
@@ -760,14 +759,14 @@ class OverlayWindow(QWidget):
             random.uniform(-0.8, 0.8)
         )
 
-        # Particle stream transferring from vacuum dustbin up into dock canister
+        # Particle stream transferring from vacuum rear dustbin down into dock canister
         if random.random() < 0.75:
             for _ in range(2):
                 self.empty_particles.append({
                     'x': self.kuma_x + random.uniform(-6, 6),
-                    'y': self.kuma_y - 6,
+                    'y': self.kuma_y + 8,
                     'tx': self.dock_x + random.uniform(-4, 4),
-                    'ty': self.dock_y - self.dock_h / 2 + 10,
+                    'ty': self.dock_y + self.dock_h / 2 - 12,
                     'progress': 0.0,
                     'speed': random.uniform(2.0, 3.4),
                     'size': random.uniform(1.4, 2.8),
@@ -849,8 +848,8 @@ class OverlayWindow(QWidget):
         w = self.dock_w
         h = self.dock_h
 
-        # Ground contact shadow with dynamic elevation
-        shadow_offset_y = 10.0 + self.dock_lift_height * 8.0
+        # Ground contact shadow with dynamic elevation (centered under disposal tower at bottom)
+        shadow_offset_y = 6.0 + self.dock_lift_height * 8.0
         shadow_scale = 1.0 + self.dock_lift_height * 0.18
         shadow_alpha = int(110 * (1.0 - self.dock_lift_height * 0.35))
 
@@ -860,10 +859,10 @@ class OverlayWindow(QWidget):
         shadow.setColorAt(1.0, QColor(0, 0, 0, 0))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(shadow))
-        painter.drawEllipse(QRectF(-w * 0.65 * shadow_scale, -h * 0.45 + shadow_offset_y, w * 1.3 * shadow_scale, h * 1.05 * shadow_scale))
+        painter.drawEllipse(QRectF(-w * 0.65 * shadow_scale, -h * 0.35 + shadow_offset_y, w * 1.3 * shadow_scale, h * 0.95 * shadow_scale))
 
-        # Dock ramp
-        ramp_rect = QRectF(-w / 2, -h / 2 + 20, w, h - 20)
+        # Dock ramp (Entrance mouth at top -Y facing North into desktop, away from taskbar)
+        ramp_rect = QRectF(-w / 2, -h / 2, w, h - 20)
         ramp_grad = QLinearGradient(-w / 2, 0, w / 2, 0)
         ramp_grad.setColorAt(0.0, QColor(24, 25, 29))
         ramp_grad.setColorAt(0.5, QColor(32, 34, 40))
@@ -876,7 +875,7 @@ class OverlayWindow(QWidget):
         # Solid side guide walls (Fenders) - single corridor entrance
         fender_w = 4.0
         fender_h = h - 22.0
-        fender_y = -h / 2 + 20.0
+        fender_y = -h / 2 + 2.0
         fender_grad = QLinearGradient(-w / 2, 0, -w / 2 + fender_w, 0)
         fender_grad.setColorAt(0.0, QColor(52, 56, 66))
         fender_grad.setColorAt(1.0, QColor(26, 28, 34))
@@ -890,18 +889,18 @@ class OverlayWindow(QWidget):
 
         # Tire alignment guide grooves
         painter.setPen(QPen(QColor(16, 17, 20), 1.5))
-        painter.drawLine(int(-w * 0.32), int(-h / 2 + 28), int(-w * 0.32), int(h / 2 - 6))
-        painter.drawLine(int(w * 0.32), int(-h / 2 + 28), int(w * 0.32), int(h / 2 - 6))
+        painter.drawLine(int(-w * 0.32), int(-h / 2 + 6), int(-w * 0.32), int(h / 2 - 24))
+        painter.drawLine(int(w * 0.32), int(-h / 2 + 6), int(w * 0.32), int(h / 2 - 24))
 
-        # Brass charging contacts
+        # Brass charging contacts (located on ramp in front of disposal tower)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(QColor(212, 175, 55)))
-        painter.drawRoundedRect(QRectF(-12, -h / 2 + 24, 6, 3), 1, 1)
-        painter.drawRoundedRect(QRectF(6, -h / 2 + 24, 6, 3), 1, 1)
+        painter.drawRoundedRect(QRectF(-12, h / 2 - 27, 6, 3), 1, 1)
+        painter.drawRoundedRect(QRectF(6, h / 2 - 27, 6, 3), 1, 1)
 
-        # Vertical disposal tower
-        tower_rect = QRectF(-w * 0.42, -h / 2, w * 0.84, 26)
-        tower_grad = QLinearGradient(0, -h / 2, 0, -h / 2 + 26)
+        # Vertical disposal tower (Tempat membuang sampah - Menghadap Taskbar di sisi bawah)
+        tower_rect = QRectF(-w * 0.42, h / 2 - 26, w * 0.84, 26)
+        tower_grad = QLinearGradient(0, h / 2 - 26, 0, h / 2)
         tower_grad.setColorAt(0.0, QColor(38, 41, 48))
         tower_grad.setColorAt(1.0, QColor(20, 21, 24))
 
@@ -911,18 +910,18 @@ class OverlayWindow(QWidget):
 
         # Tactile grip ridges on disposal tower
         painter.setPen(QPen(QColor(18, 19, 22), 1.0))
-        painter.drawLine(int(-w * 0.22), int(-h / 2 + 13), int(w * 0.22), int(-h / 2 + 13))
-        painter.drawLine(int(-w * 0.22), int(-h / 2 + 17), int(w * 0.22), int(-h / 2 + 17))
+        painter.drawLine(int(-w * 0.22), int(h / 2 - 16), int(w * 0.22), int(h / 2 - 16))
+        painter.drawLine(int(-w * 0.22), int(h / 2 - 12), int(w * 0.22), int(h / 2 - 12))
 
-        # Hover accent line on tower top rim
+        # Hover accent line on tower rim
         if self.is_dock_hovered or self.is_dock_grabbed:
             painter.setPen(QPen(QColor(56, 189, 248, 180), 1.2))
-            painter.drawLine(int(-w * 0.36), int(-h / 2 + 1), int(w * 0.36), int(-h / 2 + 1))
+            painter.drawLine(int(-w * 0.36), int(h / 2 - 25), int(w * 0.36), int(h / 2 - 25))
 
         # Suction channel glow when emptying
         if self.state == self.STATE_EMPTYING:
-            suction_rect = QRectF(-w * 0.22, -h / 2 + 10, w * 0.44, h * 0.48)
-            channel_grad = QLinearGradient(0, h * 0.3, 0, -h / 2)
+            suction_rect = QRectF(-w * 0.22, h / 2 - 25, w * 0.44, 22)
+            channel_grad = QLinearGradient(0, h / 2 - 25, 0, h / 2)
             channel_grad.setColorAt(0.0, QColor(56, 189, 248, 110))
             channel_grad.setColorAt(0.5, QColor(245, 158, 11, 130))
             channel_grad.setColorAt(1.0, QColor(56, 189, 248, 0))
@@ -944,7 +943,7 @@ class OverlayWindow(QWidget):
         led_color.setAlpha(int(240 * pulse))
         painter.setBrush(QBrush(led_color))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(QPointF(0, -h / 2 + 7), 1.5, 1.5)
+        painter.drawEllipse(QPointF(0, h / 2 - 7), 1.5, 1.5)
 
         painter.restore()
 
