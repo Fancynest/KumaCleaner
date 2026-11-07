@@ -60,6 +60,9 @@ class OverlayWindow(QWidget):
     STATE_RETURNING = "returning"
     STATE_EMPTYING = "emptying"
 
+    # Remember dock position across overlay sessions
+    SAVED_DOCK_POS: Optional[tuple[float, float]] = None
+
     def __init__(self, items: list[DesktopItem], mode: str = "clean", speed_multiplier: float = 1.0, dpr: float = 1.0):
         super().__init__()
         self.all_items = items
@@ -92,8 +95,11 @@ class OverlayWindow(QWidget):
 
         self.dock_w = 54
         self.dock_h = 82
-        self.dock_x = self.screen_w - 90
-        self.dock_y = self.screen_h - 105
+        if OverlayWindow.SAVED_DOCK_POS is not None:
+            self.dock_x, self.dock_y = OverlayWindow.SAVED_DOCK_POS
+        else:
+            self.dock_x = float(self.screen_w - 90)
+            self.dock_y = float(self.screen_h - 105)
 
         # Resting position on dock
         self.kuma_x = float(self.dock_x)
@@ -103,11 +109,19 @@ class OverlayWindow(QWidget):
         self.state = self.STATE_DOCK
         self.state_time = 0.0
 
+        # Robot grab state
         self.is_grabbed = False
         self.grab_offset_x = 0.0
         self.grab_offset_y = 0.0
         self.lift_height = 0.0
         self.wheel_spin_angle = 0.0
+
+        # Dock grab and hover state (Movable dock)
+        self.is_dock_grabbed = False
+        self.dock_grab_offset_x = 0.0
+        self.dock_grab_offset_y = 0.0
+        self.dock_lift_height = 0.0
+        self.is_dock_hovered = False
 
         self.lidar_angle = 0.0
         self.lidar_radius = 35.0
@@ -135,6 +149,17 @@ class OverlayWindow(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.game_loop)
         self.last_tick = time.time()
+
+    def get_dock_rect(self) -> QRectF:
+        """Hit box for dock station grabbing and interaction."""
+        w = float(self.dock_w)
+        h = float(self.dock_h)
+        return QRectF(
+            self.dock_x - w / 2 - 10,
+            self.dock_y - h / 2 - 10,
+            w + 20,
+            h + 20
+        )
 
     def _plan_cleaning_route(self):
         """Greedy nearest-neighbor path to clean desktop in natural sweep."""
@@ -198,15 +223,8 @@ class OverlayWindow(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             pos = event.position()
-            dist = math.hypot(pos.x() - self.kuma_x, pos.y() - self.kuma_y)
-            if dist <= self.vacuum_radius + 10:
-                self.is_grabbed = True
-                self.grab_offset_x = self.kuma_x - pos.x()
-                self.grab_offset_y = self.kuma_y - pos.y()
-                sound_fx.play('squeak')
-                self.update()
-                return
 
+            # 1. Check HUD buttons
             w = 460
             h = 38
             x = (self.screen_w - w) / 2
@@ -232,17 +250,135 @@ class OverlayWindow(QWidget):
                     self.close()
                     return
 
+            # 2. Check Dock vs Vacuum Interactivity (Draggable both when empty and with vacuum)
+            dock_rect = self.get_dock_rect()
+            dist_kuma = math.hypot(pos.x() - self.kuma_x, pos.y() - self.kuma_y)
+            is_on_kuma = (dist_kuma <= self.vacuum_radius + 4)
+            is_on_dock = dock_rect.contains(pos)
+
+            if self.state in (self.STATE_DOCK, self.STATE_EMPTYING):
+                # When robot is docked:
+                # - Clicking on dock tower (upper portion) or dock sides grabs the DOCK (moves dock + robot together)
+                # - Clicking directly on robot lifts the robot off the dock
+                if is_on_dock and (pos.y() < self.dock_y + 4 or not is_on_kuma):
+                    self.is_dock_grabbed = True
+                    self.dock_grab_offset_x = self.dock_x - pos.x()
+                    self.dock_grab_offset_y = self.dock_y - pos.y()
+                    self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                    sound_fx.play('squeak')
+                    self.update()
+                    return
+                elif is_on_kuma:
+                    self.is_grabbed = True
+                    self.grab_offset_x = self.kuma_x - pos.x()
+                    self.grab_offset_y = self.kuma_y - pos.y()
+                    self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                    sound_fx.play('squeak')
+                    self.update()
+                    return
+                elif is_on_dock:
+                    self.is_dock_grabbed = True
+                    self.dock_grab_offset_x = self.dock_x - pos.x()
+                    self.dock_grab_offset_y = self.dock_y - pos.y()
+                    self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                    sound_fx.play('squeak')
+                    self.update()
+                    return
+            else:
+                # When robot is out cleaning (dock is empty):
+                if is_on_dock:
+                    self.is_dock_grabbed = True
+                    self.dock_grab_offset_x = self.dock_x - pos.x()
+                    self.dock_grab_offset_y = self.dock_y - pos.y()
+                    self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                    sound_fx.play('squeak')
+                    self.update()
+                    return
+                elif is_on_kuma:
+                    self.is_grabbed = True
+                    self.grab_offset_x = self.kuma_x - pos.x()
+                    self.grab_offset_y = self.kuma_y - pos.y()
+                    self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                    sound_fx.play('squeak')
+                    self.update()
+                    return
+
     def mouseMoveEvent(self, event):
+        pos = event.position()
+
+        # Handle Dock Dragging (empty or with vacuum)
+        if self.is_dock_grabbed:
+            new_x = pos.x() + self.dock_grab_offset_x
+            new_y = pos.y() + self.dock_grab_offset_y
+
+            margin_x = self.dock_w / 2 + 16
+            margin_y_top = self.dock_h / 2 + 36
+            if self.state in (self.STATE_DOCK, self.STATE_EMPTYING):
+                margin_y_bottom = self.dock_h / 2 + self.vacuum_radius + 18
+            else:
+                margin_y_bottom = self.dock_h / 2 + 18
+
+            self.dock_x = max(margin_x, min(self.screen_w - margin_x, new_x))
+            self.dock_y = max(margin_y_top, min(self.screen_h - margin_y_bottom, new_y))
+
+            OverlayWindow.SAVED_DOCK_POS = (self.dock_x, self.dock_y)
+
+            # Move docked vacuum synchronously with dock
+            if self.state in (self.STATE_DOCK, self.STATE_EMPTYING):
+                self.kuma_x = float(self.dock_x)
+                self.kuma_y = float(self.dock_y + 12)
+
+            self.update()
+            return
+
+        # Handle Robot Vacuum Dragging
         if self.is_grabbed:
-            pos = event.position()
             self.kuma_x = pos.x() + self.grab_offset_x
             self.kuma_y = pos.y() + self.grab_offset_y
             self.update()
+            return
+
+        # Passive Hover Cursor Feedback
+        dock_rect = self.get_dock_rect()
+        dist_kuma = math.hypot(pos.x() - self.kuma_x, pos.y() - self.kuma_y)
+        is_on_kuma = (dist_kuma <= self.vacuum_radius + 4)
+        is_on_dock = dock_rect.contains(pos)
+
+        old_hover = self.is_dock_hovered
+        self.is_dock_hovered = is_on_dock
+
+        if is_on_dock and (self.state != self.STATE_DOCK or pos.y() < self.dock_y + 4 or not is_on_kuma):
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+        elif is_on_kuma:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        else:
+            self.unsetCursor()
+
+        if old_hover != self.is_dock_hovered:
+            self.update()
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.is_grabbed:
-            self.is_grabbed = False
-            self.update()
+        if event.button() == Qt.MouseButton.LeftButton:
+            was_dragging = self.is_dock_grabbed or self.is_grabbed
+
+            if self.is_dock_grabbed:
+                self.is_dock_grabbed = False
+                OverlayWindow.SAVED_DOCK_POS = (self.dock_x, self.dock_y)
+
+            if self.is_grabbed:
+                self.is_grabbed = False
+                # If released near the dock station, snap smoothly back onto the dock ramp!
+                dist_to_dock = math.hypot(self.kuma_x - self.dock_x, self.kuma_y - (self.dock_y + 12))
+                if dist_to_dock < 48.0:
+                    self.kuma_x = float(self.dock_x)
+                    self.kuma_y = float(self.dock_y + 12)
+                    self.kuma_angle = -math.pi * 0.5
+                    self.state = self.STATE_DOCK
+                    sound_fx.play('pop')
+
+            if was_dragging:
+                self.unsetCursor()
+                self.update()
 
     def game_loop(self):
         now = time.time()
@@ -259,9 +395,12 @@ class OverlayWindow(QWidget):
         if self.is_grabbed:
             self.wheel_spin_angle += dt * 22.0
 
+        target_dock_lift = 1.0 if self.is_dock_grabbed else 0.0
+        self.dock_lift_height += (target_dock_lift - self.dock_lift_height) * min(1.0, dt * 10.0)
+
         self.particles = [p for p in self.particles if p.update()]
 
-        if self.is_grabbed:
+        if self.is_grabbed or self.is_dock_grabbed:
             self.update()
             return
 
@@ -454,6 +593,10 @@ class OverlayWindow(QWidget):
         # 1. Dock Station
         self._draw_dock(painter)
 
+        # Repositioning tag when dock is dragged
+        if self.is_dock_grabbed:
+            self._draw_dock_tag(painter, self.dock_x, self.dock_y - self.dock_h / 2 - 16)
+
         # 2. Emptying Dust Transfer Particles
         if self.state == self.STATE_EMPTYING:
             self._draw_empty_particles(painter)
@@ -475,21 +618,40 @@ class OverlayWindow(QWidget):
         # 7. Minimalist Architectural HUD
         self._draw_hud(painter)
 
+    def _draw_dock_tag(self, painter: QPainter, x: float, y: float):
+        painter.save()
+        font = QFont("Segoe UI", 8, QFont.Weight.Medium)
+        painter.setFont(font)
+
+        tag_rect = QRectF(x - 90, y - 20, 180, 22)
+        painter.setPen(QPen(QColor(56, 189, 248, 180), 1))
+        painter.setBrush(QBrush(QColor(16, 17, 22, 235)))
+        painter.drawRoundedRect(tag_rect, 4, 4)
+
+        painter.setPen(QColor(56, 189, 248))
+        painter.drawText(tag_rect, Qt.AlignmentFlag.AlignCenter, "DOCKING STATION · MOVING")
+        painter.restore()
+
     def _draw_dock(self, painter: QPainter):
         painter.save()
-        painter.translate(self.dock_x + self.dock_shake.x(), self.dock_y + self.dock_shake.y())
+        lift_y = self.dock_lift_height * 5.0
+        painter.translate(self.dock_x + self.dock_shake.x(), self.dock_y + self.dock_shake.y() - lift_y)
 
         w = self.dock_w
         h = self.dock_h
 
-        # Ground contact shadow
-        shadow = QRadialGradient(0, 10, w * 0.75)
-        shadow.setColorAt(0.0, QColor(0, 0, 0, 110))
-        shadow.setColorAt(0.6, QColor(0, 0, 0, 40))
+        # Ground contact shadow with dynamic elevation
+        shadow_offset_y = 10.0 + self.dock_lift_height * 8.0
+        shadow_scale = 1.0 + self.dock_lift_height * 0.18
+        shadow_alpha = int(110 * (1.0 - self.dock_lift_height * 0.35))
+
+        shadow = QRadialGradient(0, shadow_offset_y, w * 0.75 * shadow_scale)
+        shadow.setColorAt(0.0, QColor(0, 0, 0, shadow_alpha))
+        shadow.setColorAt(0.6, QColor(0, 0, 0, int(shadow_alpha * 0.36)))
         shadow.setColorAt(1.0, QColor(0, 0, 0, 0))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(shadow))
-        painter.drawEllipse(QRectF(-w * 0.65, -h * 0.45, w * 1.3, h * 1.05))
+        painter.drawEllipse(QRectF(-w * 0.65 * shadow_scale, -h * 0.45 + shadow_offset_y, w * 1.3 * shadow_scale, h * 1.05 * shadow_scale))
 
         # Dock ramp
         ramp_rect = QRectF(-w / 2, -h / 2 + 20, w, h - 20)
@@ -522,6 +684,16 @@ class OverlayWindow(QWidget):
         painter.setPen(QPen(QColor(60, 64, 74), 1))
         painter.setBrush(QBrush(tower_grad))
         painter.drawRoundedRect(tower_rect, 4, 4)
+
+        # Tactile grip ridges on disposal tower
+        painter.setPen(QPen(QColor(18, 19, 22), 1.0))
+        painter.drawLine(int(-w * 0.22), int(-h / 2 + 13), int(w * 0.22), int(-h / 2 + 13))
+        painter.drawLine(int(-w * 0.22), int(-h / 2 + 17), int(w * 0.22), int(-h / 2 + 17))
+
+        # Hover accent line on tower top rim
+        if self.is_dock_hovered or self.is_dock_grabbed:
+            painter.setPen(QPen(QColor(56, 189, 248, 180), 1.2))
+            painter.drawLine(int(-w * 0.36), int(-h / 2 + 1), int(w * 0.36), int(-h / 2 + 1))
 
         # Suction channel glow when emptying
         if self.state == self.STATE_EMPTYING:
@@ -695,6 +867,10 @@ class OverlayWindow(QWidget):
 
         pos_x = self.kuma_x + self.shake_offset.x()
         pos_y = self.kuma_y + self.shake_offset.y()
+        # If parked on dock, lift synchronously with the dock
+        if self.state in (self.STATE_DOCK, self.STATE_EMPTYING) and not self.is_grabbed:
+            pos_y -= self.dock_lift_height * 5.0
+
         r = self.vacuum_radius
 
         # Drop shadow beneath chassis
